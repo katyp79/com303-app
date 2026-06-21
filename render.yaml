@@ -1,0 +1,17 @@
+# Render.com deployment blueprint (free tier). Render reads this to set up the app.
+services:
+  - type: web
+    name: com303-voice
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      # You set these in the Render dashboard — they are NOT stored in the repo.
+      - key: ANTHROPIC_API_KEY
+        sync: false          # paste your Anthropic key in Render
+      - key: INSTRUCTOR_PASSWORD
+        sync: false          # REQUIRED online: a password so only you can open the instructor side
+      - key: MODEL
+        value: claude-sonnet-4-6

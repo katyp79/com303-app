@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>COM 303 · Reading Conversation</title>
+<link rel="stylesheet" href="app.css?v=5"/>
+</head>
+<body>
+<header class="top">
+  <div><div class="logo">COM 303 · Reading Conversation</div>
+  <div class="sub" id="head-title">Speak about what you read</div></div>
+</header>
+
+<main>
+  <div id="msg"></div>
+
+  <!-- intro / gate -->
+  <section id="intro" class="card" style="display:none">
+    <h2 id="intro-title">…</h2>
+    <p class="hint" id="intro-sub"></p>
+
+    <details id="reading-wrap" style="margin:10px 0">
+      <summary style="cursor:pointer;font-weight:650;color:var(--accent-ink)">📖 Show the module material</summary>
+      <div class="reading-box" id="reading" style="margin-top:10px"></div>
+    </details>
+
+    <div id="cam-note" class="banner info" style="display:none">🎥 This assignment records video. When you begin, your browser will ask to use your camera and microphone — please allow both.</div>
+
+    <label>Your name <span class="req">*</span></label>
+    <input type="text" id="s-name" placeholder="First and last name"/>
+    <label>UW email <span class="req">*</span></label>
+    <input type="text" id="s-email" placeholder="netid@uw.edu"/>
+    <label>Student ID number <span class="req">*</span></label>
+    <input type="text" id="s-id" placeholder="e.g. 1234567"/>
+    <div class="row" style="margin-top:18px"><button class="btn big" id="begin-btn">Begin conversation</button></div>
+    <p class="footnote" id="speech-note" style="margin-top:10px"></p>
+  </section>
+
+  <!-- live session -->
+  <section id="session" style="display:none">
+    <div class="grid2">
+      <div class="card">
+        <h3><span class="recdot" id="recdot" style="display:none"></span>You</h3>
+        <video id="cam" autoplay muted playsinline></video>
+        <div class="footnote" id="cam-status" style="margin-top:8px">Camera off</div>
+      </div>
+      <div class="card">
+        <h3>Conversation</h3>
+        <div class="chat" id="chat"></div>
+      </div>
+    </div>
+
+    <div class="card" id="answer-card">
+      <h3>The coach asked</h3>
+      <div id="current-q" class="current-q">…</div>
+      <div id="countdown" class="banner warn" style="display:none"></div>
+      <div style="text-align:center">
+        <button class="mic" id="mic" disabled><span class="dot"></span><span id="mic-label">Wait…</span></button>
+        <div class="footnote" id="mic-status" style="margin-top:10px">The coach will speak first.</div>
+        <button class="btn subtle" id="retry-btn" style="display:none;margin-top:12px">↻ Retry</button>
+      </div>
+      <label style="margin-top:14px">Your answer <span class="footnote">(edit if the transcription missed a word)</span></label>
+      <textarea id="answer" rows="4" placeholder="Your spoken words appear here…"></textarea>
+      <div class="footnote" id="edit-note" style="margin-top:6px">✎ You can fix transcription mistakes, but your <strong>original spoken words and any edits are saved and shown to your instructor.</strong></div>
+      <div class="row" style="margin-top:12px">
+        <span class="footnote" id="wc"></span><span class="spacer"></span>
+        <button class="btn" id="send-btn" disabled>Send answer →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- done -->
+  <section id="done" class="card" style="display:none">
+    <div class="banner ok">✓ All done — your conversation has been submitted. Thank you!</div>
+    <div id="done-feedback"></div>
+    <p class="footnote" id="upload-status"></p>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="student.js?v=5"></script>
+</body>
+</html>
