@@ -55,9 +55,15 @@ let manuallyEdited = false; // true only when the student actually types/edits (
   if (assignment.requireCamera) $("#cam-note").style.display = "block";
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  $("#speech-note").textContent = SR
-    ? "Tip: works best in Chrome or Edge. You'll speak your answers; the text appears automatically."
-    : "Your browser can't auto-transcribe speech. You can still type your answers. (Chrome or Edge gives the full voice experience.)";
+  const sn = $("#speech-note");
+  if (SR) {
+    sn.className = "footnote";
+    sn.textContent = "Tip: speak naturally — your spoken words turn into text automatically. Use Chrome or Edge.";
+  } else {
+    // iPhone/iPad Safari and a few others can't do live voice-to-text
+    sn.className = "banner warn";
+    sn.innerHTML = "⚠️ <strong>Please use a laptop or desktop computer with Chrome or Edge.</strong> This device/browser can't turn your spoken answers into text, so the assignment won't record properly here (phones and Safari aren't supported).";
+  }
 })();
 
 // ---------- begin ----------
