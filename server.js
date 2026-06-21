@@ -39,11 +39,21 @@ function requireInstructor(req, res, next) {
 
 // ---------- health / config ----------
 app.get("/api/health", (req, res) => {
+  // Persistence self-test: a marker file written once. If storage is durable, it
+  // survives restarts (same timestamp); if ephemeral, each restart makes a new one.
+  let diskMarker = null;
+  try {
+    const marker = path.join(store.DATA_DIR, ".persist-test");
+    if (fs.existsSync(marker)) diskMarker = fs.readFileSync(marker, "utf8");
+    else { diskMarker = "first-write-" + new Date().toISOString(); fs.writeFileSync(marker, diskMarker); }
+  } catch (e) { diskMarker = "ERROR: " + e.message; }
   res.json({
     ok: true,
     hasKey: !!process.env.ANTHROPIC_API_KEY,
     model: claude.MODEL,
-    needsPassword: !!process.env.INSTRUCTOR_PASSWORD
+    needsPassword: !!process.env.INSTRUCTOR_PASSWORD,
+    dataDir: store.DATA_DIR,
+    diskMarker
   });
 });
 app.post("/api/login", (req, res) => {
