@@ -4,6 +4,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
+const archiver = require("archiver");
 const store = require("./lib/store");
 const pdf = require("./lib/pdf");
 const claude = require("./lib/claude");
@@ -189,6 +190,8 @@ app.post("/api/progress", (req, res) => {
       s.history = history;
       s.flaggedEdited = history.some(h => h && h.edited);
     }
+    if (req.body.tabAway != null) s.tabAway = parseInt(req.body.tabAway, 10) || 0;
+    if (req.body.copies != null) s.copies = parseInt(req.body.copies, 10) || 0;
     s.endedAt = Date.now();
     store.saveSubmission(s);
     res.json({ ok: true });
@@ -229,6 +232,8 @@ app.post("/api/submit", (req, res) => {
     submission.endedAt = parseInt(req.body.endedAt, 10) || Date.now();
     submission.flaggedPaste = !!req.body.flaggedPaste;
     submission.flaggedEdited = Array.isArray(history) && history.some(h => h && h.edited);
+    submission.tabAway = parseInt(req.body.tabAway, 10) || 0;
+    submission.copies = parseInt(req.body.copies, 10) || 0;
     submission.submittedAt = Date.now();
     submission.status = "complete";
 
@@ -271,7 +276,7 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return `"${s.replace(/"/g, '""')}"`;
   };
-  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "EditedTranscript", "FeedbackShared", "Transcript", "Feedback"];
+  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "EditedTranscript", "TabSwitches", "Copies", "FeedbackShared", "Transcript", "Feedback"];
   const lines = subs.map(s => {
     const dur = (s.startedAt && s.endedAt) ? Math.round((s.endedAt - s.startedAt) / 1000) : "";
     const transcript = (s.history || []).map(h => `${h.role === "tutor" ? "Coach" : s.studentName}: ${h.text}`).join("\n");
@@ -281,7 +286,7 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
       s.startedAt ? new Date(s.startedAt).toLocaleString() : "",
       dur, new Date(s.submittedAt).toLocaleString(),
       s.grade == null ? "" : s.grade, s.suggestedScore == null ? "" : s.suggestedScore,
-      s.flaggedPaste ? "YES" : "", s.flaggedEdited ? "YES" : "", s.feedbackApproved ? "YES" : "",
+      s.flaggedPaste ? "YES" : "", s.flaggedEdited ? "YES" : "", s.tabAway || 0, s.copies || 0, s.feedbackApproved ? "YES" : "",
       transcript, s.feedback || ""
     ].map(q).join(",");
   });
@@ -291,6 +296,43 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
   res.setHeader("Content-Disposition", "attachment; filename=com303-submissions.csv");
   res.send(csv);
 });
+
+// Bulk-download all videos (for the current assignment filter) as one zip — for offloading.
+app.get("/api/videos.zip", requireInstructor, (req, res) => {
+  const sel = req.query.assignmentId;
+  let subs = store.getSubmissions().filter(s => s.videoFile);
+  if (sel) subs = subs.filter(s => s.assignmentId === sel);
+  const files = subs.map(s => ({ s, p: path.join(store.VIDEO_DIR, s.videoFile) })).filter(x => fs.existsSync(x.p));
+  if (!files.length) return res.status(404).send("No videos to download.");
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", "attachment; filename=com303-videos.zip");
+  const archive = archiver("zip", { zlib: { level: 0 } }); // store mode — videos are already compressed
+  archive.on("error", err => { console.error("zip error:", err.message); try { res.destroy(); } catch {} });
+  archive.pipe(res);
+  for (const { s, p } of files) {
+    const name = (s.studentName || "student").replace(/[^\w.-]+/g, "_") + "__" + s.id + ".webm";
+    archive.file(p, { name });
+  }
+  archive.finalize();
+});
+
+// Delete videos (keep transcripts/grades) to free disk space — after you've offloaded.
+app.post("/api/purge-videos", requireInstructor, (req, res) => {
+  const sel = req.body && req.body.assignmentId;
+  let subs = store.getSubmissions();
+  if (sel) subs = subs.filter(s => s.assignmentId === sel);
+  let purged = 0;
+  for (const s of subs) {
+    if (s.videoFile) {
+      const p = path.join(store.VIDEO_DIR, s.videoFile);
+      if (fs.existsSync(p)) { try { fs.unlinkSync(p); } catch {} }
+      s.videoFile = null; s.videoPurgedAt = Date.now();
+      store.saveSubmission(s); purged++;
+    }
+  }
+  res.json({ ok: true, purged });
+});
+
 app.get("/api/submissions/:id", requireInstructor, (req, res) => {
   const s = store.getSubmission(req.params.id);
   if (!s) return res.status(404).json({ error: "not found" });

@@ -179,6 +179,19 @@ $("#export-csv").addEventListener("click", () => {
   const url = "/api/submissions.csv?key=" + encodeURIComponent(KEY) + (sel ? "&assignmentId=" + encodeURIComponent(sel) : "");
   window.location = url;
 });
+$("#download-videos").addEventListener("click", () => {
+  const sel = $("#sub-filter").value;
+  window.location = "/api/videos.zip?key=" + encodeURIComponent(KEY) + (sel ? "&assignmentId=" + encodeURIComponent(sel) : "");
+});
+$("#purge-videos").addEventListener("click", async () => {
+  const sel = $("#sub-filter").value;
+  const scope = sel ? "this assignment" : "ALL assignments";
+  if (!confirm("Delete the video files for " + scope + "?\n\nTranscripts and grades are KEPT. Make sure you've downloaded the videos first — this can't be undone.")) return;
+  const r = await api("/api/purge-videos", { json: true, method: "POST", body: JSON.stringify({ assignmentId: sel || undefined }) });
+  const d = await r.json().catch(() => ({}));
+  toast(r.ok ? "Deleted " + (d.purged || 0) + " video(s); transcripts kept" : "Failed");
+  loadSubmissions();
+});
 async function loadSubmissions() {
   allSubs = await (await api("/api/submissions")).json();
   const f = $("#sub-filter");
@@ -194,7 +207,7 @@ function renderSubs() {
   box.innerHTML = "";
   rows.forEach(s => {
     const el = document.createElement("div"); el.className = "list-item";
-    const fb = (s.status === "in-progress" ? `<span class="pill warn">⏳ incomplete</span> ` : "") + (s.grade != null && s.grade !== "" ? `<span class="pill good">grade: ${esc(s.grade)}</span> ` : (s.suggestedScore != null ? `<span class="pill muted">suggested: ${s.suggestedScore}</span> ` : "")) + (s.flaggedPaste ? `<span class="pill warn">⚠ pasted</span> ` : "") + (s.flaggedEdited ? `<span class="pill warn">✎ edited</span> ` : "") + (s.feedbackApproved ? `<span class="pill good">shared</span>` : "");
+    const fb = (s.status === "in-progress" ? `<span class="pill warn">⏳ incomplete</span> ` : "") + (s.grade != null && s.grade !== "" ? `<span class="pill good">grade: ${esc(s.grade)}</span> ` : (s.suggestedScore != null ? `<span class="pill muted">suggested: ${s.suggestedScore}</span> ` : "")) + (s.flaggedPaste ? `<span class="pill warn">⚠ pasted</span> ` : "") + (s.flaggedEdited ? `<span class="pill warn">✎ edited</span> ` : "") + (s.tabAway ? `<span class="pill warn">👁 away ${s.tabAway}×</span> ` : "") + (s.copies ? `<span class="pill warn">⎘ copied ${s.copies}×</span> ` : "") + (s.feedbackApproved ? `<span class="pill good">shared</span>` : "");
     el.innerHTML = `<div style="flex:1"><div style="font-weight:650">${esc(s.studentName)} ${s.studentId ? `<span class="meta">(${esc(s.studentId)})</span>` : ""}</div>
       <div class="meta">${s.studentEmail ? esc(s.studentEmail) + " · " : ""}${esc(s.assignmentTitle)} · ${fmt(s.submittedAt)} · ${s.hasVideo ? "🎥 video" : (s.videoPurgedAt ? "video offloaded" : "no video")}</div></div> ${fb}`;
     const open = document.createElement("button"); open.className = "btn subtle"; open.textContent = "Open"; open.style.fontSize = "13px";
@@ -212,19 +225,33 @@ async function openSub(id) {
   const dur = (s.startedAt && s.endedAt) ? ` · lasted ${mmss(s.endedAt - s.startedAt)}` : "";
   const startStr = s.startedAt ? fmtTZ(s.startedAt) : fmtTZ(s.submittedAt);
 
-  const transcript = hist.map(h => {
+  let maxGapMs = 0;
+  const transcript = hist.map((h, i) => {
     const who = h.role === "tutor" ? "Coach" : esc(s.studentName);
     const t = h.at ? `<span class="meta"> · ${fmtTZ(h.at)}</span>` : "";
     const jump = (s.hasVideo && h.videoOffsetMs != null)
       ? ` <a href="#" class="vjump" data-off="${Math.round(h.videoOffsetMs / 1000)}">▶ ${mmss(h.videoOffsetMs)}</a>` : "";
+    let resp = "";
+    if (h.role === "student" && h.at && i > 0 && hist[i - 1].role === "tutor" && hist[i - 1].at) {
+      const gap = h.at - hist[i - 1].at;
+      if (gap > maxGapMs) maxGapMs = gap;
+      const longish = gap > 180000; // > 3 min from question to answer (60s think-time is allowed)
+      resp = ` <span class="meta" style="${longish ? "color:var(--warn);font-weight:700" : ""}">⏱ ${mmss(gap)} to answer</span>`;
+    }
     let edited = "";
     if (h.role === "student" && h.edited && h.spoken) {
       edited = `<div class="meta" style="margin:4px 0 0 14px;padding-left:8px;border-left:2px solid var(--warn)">`
         + `<span class="pill warn">✎ edited</span> originally transcribed: “${esc(h.spoken)}”`
         + `<div style="margin-top:2px">changes: ${wordDiff(h.spoken, h.text)}</div></div>`;
     }
-    return `<div class="transcript-line"><span class="who">${who}:</span> ${esc(h.text)}${t}${jump}${edited}</div>`;
+    return `<div class="transcript-line"><span class="who">${who}:</span> ${esc(h.text)}${t}${resp}${jump}${edited}</div>`;
   }).join("");
+  const longPause = maxGapMs > 180000;
+  const watchBits = [
+    s.tabAway ? `switched away from the page ${s.tabAway}×` : null,
+    s.copies ? `copied text ${s.copies}×` : null,
+    longPause ? `a long pause before answering (${mmss(maxGapMs)})` : null
+  ].filter(Boolean);
 
   d.innerHTML = `<div class="row"><h2 style="margin:0">${esc(s.studentName)}</h2><span class="spacer"></span>
       <button class="btn danger" id="del-sub" style="font-size:13px">Delete submission + video</button></div>
@@ -234,6 +261,7 @@ async function openSub(id) {
     ${s.status === "in-progress" ? `<div class="banner warn">⏳ <strong>Not submitted.</strong> This attempt was autosaved but never completed — the student likely closed the tab or their device crashed mid-conversation. The partial transcript is below; there's no video or AI feedback for it. They may have a separate completed attempt.</div>` : ""}
     ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>pasted text</strong> into the answer box during the session. Compare the transcript against the video to confirm the words were actually spoken.</div>` : ""}
     ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>edited the transcription</strong> of one or more spoken answers. The edited answers below show the original and exactly what changed.</div>` : ""}
+    ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${s.hasVideo ? `<video id="sub-video" controls src="/api/video/${s.id}?key=${encodeURIComponent(KEY)}"></video>
       <div class="footnote" style="margin:6px 0 16px">▸ Click a <strong>▶ time</strong> beside any answer to jump the video to that moment. To keep this past your retention window, download it (right-click → Save) to your external drive, then delete the submission.</div>` :
       (s.videoPurgedAt ? `<div class="banner info">Video was offloaded/removed on ${fmtTZ(s.videoPurgedAt)}. Transcript kept below.</div>` : (s.videoError ? `<div class="banner warn">🎥 ${esc(s.videoError)}</div>` : ""))}

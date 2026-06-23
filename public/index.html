@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>COM 303 · Instructor</title>
-<link rel="stylesheet" href="app.css?v=6"/>
+<link rel="stylesheet" href="app.css?v=7"/>
 </head>
 <body>
 <header class="top">
@@ -155,7 +155,12 @@
   <section class="view" id="view-submissions">
     <div class="card">
       <h2>Submissions</h2>
-      <div class="row"><select id="sub-filter" style="max-width:360px"></select><span class="spacer"></span><button class="btn ghost" id="export-csv">⤓ Export CSV</button></div>
+      <div class="row"><select id="sub-filter" style="max-width:360px"></select><span class="spacer"></span>
+        <button class="btn ghost" id="export-csv">⤓ Export CSV</button>
+        <button class="btn ghost" id="download-videos">⤓ All videos (zip)</button>
+        <button class="btn danger" id="purge-videos">Delete videos</button>
+      </div>
+      <p class="footnote" style="margin-top:6px">Offload routine: <strong>Export CSV</strong> + <strong>download videos</strong> to your external drive, then <strong>Delete videos</strong> to free space (transcripts &amp; grades are kept).</p>
       <div id="submission-list" style="margin-top:14px"><div class="empty">Loading…</div></div>
     </div>
     <div class="card" id="sub-detail" style="display:none"></div>
@@ -163,6 +168,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="instructor.js?v=6"></script>
+<script src="instructor.js?v=7"></script>
 </body>
 </html>

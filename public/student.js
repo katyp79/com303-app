@@ -18,10 +18,16 @@ function saveProgress() {
   if (!sessionId) return;
   fetch("/api/progress", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, assignmentId: ASSIGNMENT_ID, student, history, startedAt: sessionStartedAt })
+    body: JSON.stringify({ sessionId, assignmentId: ASSIGNMENT_ID, student, history, startedAt: sessionStartedAt, tabAway: tabAwayCount, copies: copyCount })
   }).catch(() => {}); // fire-and-forget; never block the conversation on this
 }
 let sessionActive = false; // true while a conversation is in progress and not yet submitted
+
+// ---- integrity signals (not proof — just "worth a look", paired with the video) ----
+let tabAwayCount = 0;  // times the student switched tabs/apps mid-session (e.g. to look something up)
+let copyCount = 0;     // times the student copied text (e.g. the question, to paste elsewhere)
+document.addEventListener("visibilitychange", () => { if (sessionActive && document.hidden) tabAwayCount++; });
+document.addEventListener("copy", () => { if (sessionActive) copyCount++; });
 
 // Warn before closing the tab mid-conversation (browsers show a generic confirm dialog).
 window.addEventListener("beforeunload", (e) => {
@@ -323,6 +329,8 @@ async function finish() {
   fd.append("endedAt", String(Date.now()));
   fd.append("sessionId", sessionId || "");
   fd.append("flaggedPaste", pasteUsed ? "1" : "");
+  fd.append("tabAway", String(tabAwayCount));
+  fd.append("copies", String(copyCount));
   if (blob && blob.size) fd.append("video", blob, "session.webm");
 
   try {
