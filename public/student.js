@@ -88,16 +88,19 @@ let manuallyEdited = false; // true only when the student actually types/edits (
   const sn = $("#speech-note");
   if (SR) {
     sn.className = "footnote";
-    sn.textContent = "Tip: speak naturally — your spoken words turn into text automatically. Use Chrome or Edge.";
+    sn.textContent = "Tip: speak naturally — your spoken words turn into text automatically. (Use Chrome or Edge.)";
   } else {
-    // iPhone/iPad Safari and a few others can't do live voice-to-text
-    sn.className = "banner warn";
-    sn.innerHTML = "⚠️ <strong>Please use a laptop or desktop computer with Chrome or Edge.</strong> This device/browser can't turn your spoken answers into text, so the assignment won't record properly here (phones and Safari aren't supported).";
+    // Hard stop: this browser can't do voice. Don't let them start, and don't invite typing.
+    sn.className = "banner err";
+    sn.innerHTML = "🚫 <strong>This browser won't work for this assignment.</strong> It can't record spoken answers.<br><br>Please open this same link in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a computer, and begin there. <span class='footnote'>(Firefox, Safari, and phone browsers are not supported.)</span>";
+    $("#begin-btn").disabled = true;
+    $("#begin-btn").textContent = "Open in Chrome or Edge to begin";
   }
 })();
 
 // ---------- begin ----------
 $("#begin-btn").addEventListener("click", async () => {
+  if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) return toast("Please open this link in Chrome or Edge on a computer.");
   student.name = $("#s-name").value.trim();
   student.email = $("#s-email").value.trim();
   student.id = $("#s-id").value.trim();
@@ -257,7 +260,7 @@ function startListening(attempt) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
   $("#countdown").style.display = "none";
-  if (!SR) { setMic(true, "Type instead"); $("#mic-status").textContent = "Voice isn't supported here — type your answer below, then Send."; $("#answer").focus(); return; }
+  if (!SR) { setMic(false, "Not supported"); $("#send-btn").disabled = true; $("#mic-status").textContent = "This browser can't record voice. Please reopen this link in Chrome or Edge."; return; }
   // Don't open the mic while the coach is still talking (prevents capturing its voice)
   if (window.speechSynthesis && window.speechSynthesis.speaking) {
     setTimeout(() => { if (!listening) startListening(attempt); }, 300);
