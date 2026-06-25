@@ -14,6 +14,7 @@ let mediaStream = null, mediaRecorder = null, videoChunks = [];
 let recordingStartedAt = null, sessionStartedAt = null;
 let sessionSeed = Math.floor(Math.random() * 1e9) + 1; // randomizes question order/angle per student
 let sessionId = null; // unique id for this attempt, used to autosave progress server-side
+let heartbeatTimer = null; // pings the server periodically so the instructor can see live sessions
 function saveProgress() {
   if (!sessionId) return;
   fetch("/api/progress", {
@@ -119,6 +120,8 @@ $("#begin-btn").addEventListener("click", async () => {
   sessionStartedAt = Date.now();
   sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   sessionActive = true;
+  saveProgress(); // register this attempt immediately so it shows as "active now"
+  heartbeatTimer = setInterval(saveProgress, 30000); // keep the "active now" status fresh
 
   // record the whole session
   if (mediaStream) {
@@ -374,6 +377,7 @@ async function finish() {
 
   if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
   sessionActive = false; // submitted — safe to leave the page now
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
 }
 function stopRecording() {
   return new Promise(resolve => {

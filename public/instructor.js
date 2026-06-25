@@ -40,7 +40,26 @@ function switchView(name) {
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   if (name === "assignments") loadAssignments();
-  if (name === "submissions") loadSubmissions();
+  if (name === "submissions") { loadSubmissions(); startSubsAutoRefresh(); } else { stopSubsAutoRefresh(); }
+}
+
+// ---- live "recording now" indicator (auto-refreshes while on the Submissions tab) ----
+let subsRefreshTimer = null;
+function startSubsAutoRefresh() { stopSubsAutoRefresh(); subsRefreshTimer = setInterval(refreshSubsQuietly, 15000); }
+function stopSubsAutoRefresh() { if (subsRefreshTimer) { clearInterval(subsRefreshTimer); subsRefreshTimer = null; } }
+async function refreshSubsQuietly() {
+  // re-fetch + re-render the list and active banner WITHOUT closing an open submission
+  try { allSubs = await (await api("/api/submissions")).json(); renderSubs(); updateActiveNow(); } catch {}
+}
+function updateActiveNow() {
+  const el = $("#active-now"); if (!el) return;
+  const cutoff = Date.now() - 90000; // "active" = an in-progress session that pinged in the last 90s
+  const live = allSubs.filter(s => s.status === "in-progress" && s.endedAt && s.endedAt > cutoff);
+  if (live.length) {
+    el.innerHTML = `<div class="banner warn">🔴 <strong>${live.length} student(s) recording right now</strong>: ${live.map(s => esc(s.studentName || "?")).join(", ")}. Don't restart or redeploy until they finish.</div>`;
+  } else {
+    el.innerHTML = `<div class="banner ok">✓ No one is recording right now — safe to restart / redeploy. <span class="footnote">(updates every 15s)</span></div>`;
+  }
 }
 
 // ---------- boot / login ----------
@@ -197,7 +216,7 @@ async function loadSubmissions() {
   const f = $("#sub-filter");
   const titles = {}; allSubs.forEach(s => titles[s.assignmentId] = s.assignmentTitle);
   f.innerHTML = `<option value="">All assignments</option>` + Object.entries(titles).map(([id, t]) => `<option value="${id}">${esc(t)}</option>`).join("");
-  f.onchange = renderSubs; renderSubs(); $("#sub-detail").style.display = "none";
+  f.onchange = renderSubs; renderSubs(); updateActiveNow(); $("#sub-detail").style.display = "none";
 }
 function renderSubs() {
   const sel = $("#sub-filter").value;
