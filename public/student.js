@@ -27,16 +27,25 @@ let sessionActive = false; // true while a conversation is in progress and not y
 let awayEvents = [];   // each time the student left the page: {videoOffsetMs, durationMs, q}
 let copyEvents = [];   // each copy: {text, videoOffsetMs, q}
 let pasteEvents = [];  // each paste into the answer box: {text, videoOffsetMs, q}
-let hiddenAt = null;
+let awayStart = null;
 const questionNum = () => history.filter(h => h.role === "tutor").length;
-document.addEventListener("visibilitychange", () => {
-  if (!sessionActive) return;
-  if (document.hidden) hiddenAt = Date.now();
-  else if (hiddenAt) {
-    if (awayEvents.length < 100) awayEvents.push({ videoOffsetMs: hiddenAt - (recordingStartedAt || hiddenAt), durationMs: Date.now() - hiddenAt, q: questionNum() });
-    hiddenAt = null;
+// "away" = the tab is hidden OR the window lost focus (e.g. alt-tabbed to another app/window).
+// Only record stretches longer than 1.5s, so momentary focus blips (clicking the address bar) don't count.
+function checkActivity() {
+  const active = !document.hidden && document.hasFocus();
+  if (!active && awayStart === null) {
+    awayStart = Date.now();
+  } else if (active && awayStart !== null) {
+    const dur = Date.now() - awayStart;
+    if (sessionActive && dur > 1500 && awayEvents.length < 100) {
+      awayEvents.push({ videoOffsetMs: awayStart - (recordingStartedAt || awayStart), durationMs: dur, q: questionNum() });
+    }
+    awayStart = null;
   }
-});
+}
+document.addEventListener("visibilitychange", checkActivity);
+window.addEventListener("blur", checkActivity);
+window.addEventListener("focus", checkActivity);
 document.addEventListener("copy", () => {
   if (!sessionActive || copyEvents.length >= 100) return;
   const sel = (document.getSelection && document.getSelection().toString()) || "";
