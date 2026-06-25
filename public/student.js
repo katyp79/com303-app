@@ -11,6 +11,7 @@ let assignment = null;
 let history = [];          // [{role:'tutor'|'student', text}]
 let student = { name: "", id: "" };
 let mediaStream = null, mediaRecorder = null, videoChunks = [];
+let audioRecorder = null, audioChunks = []; // separate audio-only backup, in case the video recording fails
 let recordingStartedAt = null, sessionStartedAt = null;
 let sessionSeed = Math.floor(Math.random() * 1e9) + 1; // randomizes question order/angle per student
 let sessionId = null; // unique id for this attempt, used to autosave progress server-side
@@ -139,10 +140,26 @@ $("#begin-btn").addEventListener("click", async () => {
       $("#recdot").style.display = "inline-block";
       $("#cam-status").textContent = assignment.requireCamera ? "Recording video" : "Recording audio";
     } catch (e) { $("#cam-status").textContent = "Recording unavailable"; }
+
+    // Separate audio-only backup — survives even if the video recording fails (common on Safari).
+    try {
+      const audioStream = new MediaStream(mediaStream.getAudioTracks());
+      const aMime = pickAudioMime();
+      audioRecorder = new MediaRecorder(audioStream, aMime ? { mimeType: aMime, audioBitsPerSecond: 64000 } : {});
+      audioRecorder.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
+      if (!recordingStartedAt) recordingStartedAt = Date.now();
+      audioRecorder.start(1000);
+    } catch (e) { /* no audio backup available on this browser */ }
   }
 
   coachTurn(); // AI opens
 });
+
+function pickAudioMime() {
+  const opts = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+  for (const m of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return "";
+}
 
 function pickMime() {
   const opts = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "audio/webm"];
@@ -350,8 +367,8 @@ async function finish() {
   $("#done").style.display = "block";
   $("#upload-status").textContent = "Saving your conversation…";
 
-  // stop recording and gather the blob
-  const blob = await stopRecording();
+  // stop recording and gather both the video and the audio-backup blobs
+  const { video, audio } = await stopRecording();
 
   const fd = new FormData();
   fd.append("assignmentId", ASSIGNMENT_ID);
@@ -366,13 +383,15 @@ async function finish() {
   fd.append("awayEvents", JSON.stringify(awayEvents));
   fd.append("copyEvents", JSON.stringify(copyEvents));
   fd.append("pasteEvents", JSON.stringify(pasteEvents));
-  if (blob && blob.size) fd.append("video", blob, "session.webm");
+  if (video && video.size) fd.append("video", video, "session.webm");
+  if (audio && audio.size) fd.append("audio", audio, "session-audio.webm");
 
   try {
     const r = await fetch("/api/submit", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "upload failed");
-    $("#upload-status").textContent = "Submitted successfully" + (blob ? ` · video ${(blob.size / 1048576).toFixed(1)} MB` : "");
+    const sizeNote = video && video.size ? ` · video ${(video.size / 1048576).toFixed(1)} MB` : (audio && audio.size ? ` · audio ${(audio.size / 1048576).toFixed(1)} MB` : "");
+    $("#upload-status").textContent = "Submitted successfully" + sizeNote;
     if (d.feedbackShared && d.feedback) {
       $("#done-feedback").innerHTML = `<h3>Feedback from your instructor's AI coach</h3><div class="reading-box">${esc(d.feedback)}</div>`;
     }
@@ -383,9 +402,14 @@ async function finish() {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
 }
 function stopRecording() {
-  return new Promise(resolve => {
-    if (!mediaRecorder || mediaRecorder.state === "inactive") return resolve(null);
-    mediaRecorder.onstop = () => resolve(new Blob(videoChunks, { type: videoChunks[0]?.type || "video/webm" }));
-    try { mediaRecorder.stop(); } catch { resolve(null); }
+  const stopOne = (rec, chunks, fallbackType) => new Promise(resolve => {
+    const make = () => chunks.length ? new Blob(chunks, { type: chunks[0]?.type || fallbackType }) : null;
+    if (!rec || rec.state === "inactive") return resolve(make());
+    rec.onstop = () => resolve(make());
+    try { rec.stop(); } catch { resolve(make()); }
   });
+  return Promise.all([
+    stopOne(mediaRecorder, videoChunks, "video/webm"),
+    stopOne(audioRecorder, audioChunks, "audio/webm")
+  ]).then(([video, audio]) => ({ video, audio }));
 }

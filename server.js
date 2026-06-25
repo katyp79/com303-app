@@ -24,10 +24,14 @@ const uploadPdf = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 const uploadVideo = multer({
   storage: multer.diskStorage({
     destination: store.VIDEO_DIR,
-    filename: (req, file, cb) => cb(null, store.uid() + ".webm")
+    filename: (req, file, cb) => {
+      const ext = /mp4/.test(file.mimetype || "") ? ".mp4" : /ogg/.test(file.mimetype || "") ? ".ogg" : ".webm";
+      cb(null, store.uid() + ext);
+    }
   }),
   limits: { fileSize: 300 * 1024 * 1024 }
 });
+const uploadRec = uploadVideo.fields([{ name: "video", maxCount: 1 }, { name: "audio", maxCount: 1 }]);
 
 // ---------- instructor gate (simple, for the pilot) ----------
 function requireInstructor(req, res, next) {
@@ -203,7 +207,7 @@ app.post("/api/progress", (req, res) => {
 app.post("/api/submit", (req, res) => {
   // Run multer manually so that even if the VIDEO fails (e.g. too large), we still
   // save the transcript — the text fields are parsed before the file, so req.body has them.
-  uploadVideo.single("video")(req, res, async (uploadErr) => {
+  uploadRec(req, res, async (uploadErr) => {
   try {
     if (uploadErr) console.error("video upload issue:", uploadErr.code || uploadErr.message);
     const assignmentId = req.body.assignmentId;
@@ -227,8 +231,11 @@ app.post("/api/submit", (req, res) => {
     submission.studentEmail = student.email;
     submission.studentId = student.id;
     submission.history = history;
-    submission.videoFile = req.file ? req.file.filename : (submission.videoFile || null);
-    submission.videoError = uploadErr ? (uploadErr.code === "LIMIT_FILE_SIZE" ? "Video too large to store — transcript saved." : "Video upload failed — transcript saved.") : null;
+    const vF = req.files && req.files.video && req.files.video[0];
+    const aF = req.files && req.files.audio && req.files.audio[0];
+    submission.videoFile = vF ? vF.filename : (submission.videoFile || null);
+    submission.audioFile = aF ? aF.filename : (submission.audioFile || null);
+    submission.videoError = uploadErr ? (uploadErr.code === "LIMIT_FILE_SIZE" ? "Recording too large to store — transcript saved." : "Recording upload failed — transcript saved.") : null;
     submission.startedAt = parseInt(req.body.startedAt, 10) || submission.startedAt || null;
     submission.endedAt = parseInt(req.body.endedAt, 10) || Date.now();
     submission.flaggedPaste = !!req.body.flaggedPaste;
@@ -267,7 +274,9 @@ app.get("/api/submissions", requireInstructor, (req, res) => {
   const list = store.getSubmissions().map(s => ({
     ...s,
     hasVideo: !!s.videoFile,
-    videoFile: undefined
+    hasAudio: !!s.audioFile,
+    videoFile: undefined,
+    audioFile: undefined
   }));
   res.json(list);
 });
@@ -304,22 +313,24 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
   res.send(csv);
 });
 
-// Bulk-download all videos (for the current assignment filter) as one zip — for offloading.
+// Bulk-download all recordings (video + audio backups) for the filter as one zip — for offloading.
 app.get("/api/videos.zip", requireInstructor, (req, res) => {
   const sel = req.query.assignmentId;
-  let subs = store.getSubmissions().filter(s => s.videoFile);
+  let subs = store.getSubmissions().filter(s => s.videoFile || s.audioFile);
   if (sel) subs = subs.filter(s => s.assignmentId === sel);
-  const files = subs.map(s => ({ s, p: path.join(store.VIDEO_DIR, s.videoFile) })).filter(x => fs.existsSync(x.p));
-  if (!files.length) return res.status(404).send("No videos to download.");
+  const files = [];
+  for (const s of subs) {
+    const base = (s.studentName || "student").replace(/[^\w.-]+/g, "_") + "__" + s.id;
+    if (s.videoFile) { const p = path.join(store.VIDEO_DIR, s.videoFile); if (fs.existsSync(p)) files.push({ p, name: base + path.extname(s.videoFile) }); }
+    if (s.audioFile) { const p = path.join(store.VIDEO_DIR, s.audioFile); if (fs.existsSync(p)) files.push({ p, name: base + "_audio" + path.extname(s.audioFile) }); }
+  }
+  if (!files.length) return res.status(404).send("No recordings to download.");
   res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", "attachment; filename=com303-videos.zip");
-  const archive = archiver("zip", { zlib: { level: 0 } }); // store mode — videos are already compressed
+  res.setHeader("Content-Disposition", "attachment; filename=com303-recordings.zip");
+  const archive = archiver("zip", { zlib: { level: 0 } }); // store mode — media is already compressed
   archive.on("error", err => { console.error("zip error:", err.message); try { res.destroy(); } catch {} });
   archive.pipe(res);
-  for (const { s, p } of files) {
-    const name = (s.studentName || "student").replace(/[^\w.-]+/g, "_") + "__" + s.id + ".webm";
-    archive.file(p, { name });
-  }
+  for (const { p, name } of files) archive.file(p, { name });
   archive.finalize();
 });
 
@@ -330,12 +341,15 @@ app.post("/api/purge-videos", requireInstructor, (req, res) => {
   if (sel) subs = subs.filter(s => s.assignmentId === sel);
   let purged = 0;
   for (const s of subs) {
-    if (s.videoFile) {
-      const p = path.join(store.VIDEO_DIR, s.videoFile);
-      if (fs.existsSync(p)) { try { fs.unlinkSync(p); } catch {} }
-      s.videoFile = null; s.videoPurgedAt = Date.now();
-      store.saveSubmission(s); purged++;
+    let did = false;
+    for (const key of ["videoFile", "audioFile"]) {
+      if (s[key]) {
+        const p = path.join(store.VIDEO_DIR, s[key]);
+        if (fs.existsSync(p)) { try { fs.unlinkSync(p); } catch {} }
+        s[key] = null; did = true;
+      }
     }
+    if (did) { s.videoPurgedAt = Date.now(); store.saveSubmission(s); purged++; }
   }
   res.json({ ok: true, purged });
 });
@@ -343,7 +357,14 @@ app.post("/api/purge-videos", requireInstructor, (req, res) => {
 app.get("/api/submissions/:id", requireInstructor, (req, res) => {
   const s = store.getSubmission(req.params.id);
   if (!s) return res.status(404).json({ error: "not found" });
-  res.json({ ...s, hasVideo: !!s.videoFile });
+  res.json({ ...s, hasVideo: !!s.videoFile, hasAudio: !!s.audioFile });
+});
+app.get("/api/audio/:id", requireInstructor, (req, res) => {
+  const s = store.getSubmission(req.params.id);
+  if (!s || !s.audioFile) return res.status(404).send("No audio");
+  const p = path.join(store.VIDEO_DIR, s.audioFile);
+  if (!fs.existsSync(p)) return res.status(404).send("Audio file missing");
+  res.sendFile(p);
 });
 app.get("/api/video/:id", requireInstructor, (req, res) => {
   const s = store.getSubmission(req.params.id);

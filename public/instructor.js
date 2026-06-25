@@ -297,6 +297,7 @@ async function openSub(id) {
     ${s.hasVideo ? `<video id="sub-video" controls src="/api/video/${s.id}?key=${encodeURIComponent(KEY)}"></video>
       <div class="footnote" style="margin:6px 0 16px">▸ Click a <strong>▶ time</strong> beside any answer to jump the video to that moment. To keep this past your retention window, download it (right-click → Save) to your external drive, then delete the submission.</div>` :
       (s.videoPurgedAt ? `<div class="banner info">Video was offloaded/removed on ${fmtTZ(s.videoPurgedAt)}. Transcript kept below.</div>` : (s.videoError ? `<div class="banner warn">🎥 ${esc(s.videoError)}</div>` : ""))}
+    ${s.hasAudio ? `<div style="margin:6px 0 16px"><div class="footnote" style="margin-bottom:4px">🔊 Audio backup${s.hasVideo ? "" : " — no video was captured, but here's the audio of what they said"}:</div><audio controls src="/api/audio/${s.id}?key=${encodeURIComponent(KEY)}" style="width:100%"></audio></div>` : ""}
     <h3>Transcript</h3><div class="reading-box">${transcript || "(empty)"}</div>
     <h3 style="margin-top:18px">AI feedback (for you to review)</h3>
     <textarea id="fb-text" rows="7">${esc(s.feedback || "")}</textarea>
