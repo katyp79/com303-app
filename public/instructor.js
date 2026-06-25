@@ -250,8 +250,20 @@ async function openSub(id) {
   const watchBits = [
     s.tabAway ? `switched away from the page ${s.tabAway}×` : null,
     s.copies ? `copied text ${s.copies}×` : null,
+    (s.pasteEvents && s.pasteEvents.length) ? `pasted ${s.pasteEvents.length}×` : null,
     longPause ? `a long pause before answering (${mmss(maxGapMs)})` : null
   ].filter(Boolean);
+  // per-event detail with clickable jumps to that moment in the video
+  const off = e => (s.hasVideo && e.videoOffsetMs != null) ? ` <a href="#" class="vjump" data-off="${Math.round(e.videoOffsetMs / 1000)}">▶ ${mmss(e.videoOffsetMs)}</a>` : "";
+  const awayDetail = (s.awayEvents || []).map(e => `<li>Left the page for <strong>${mmss(e.durationMs)}</strong>${e.q ? ` (during Q${e.q})` : ""}${off(e)}</li>`).join("");
+  const copyDetail = (s.copyEvents || []).map(e => `<li>Copied: “<em>${esc((e.text || "").trim() || "(nothing was selected)")}</em>”${e.q ? ` (Q${e.q})` : ""}${off(e)}</li>`).join("");
+  const pasteDetail = (s.pasteEvents || []).map(e => `<li>Pasted into the answer: “<em>${esc((e.text || "").trim() || "(empty)")}</em>”${e.q ? ` (Q${e.q})` : ""}${off(e)}</li>`).join("");
+  const integrityDetail = (awayDetail || copyDetail || pasteDetail)
+    ? `<div class="banner warn" style="text-align:left">
+        ${awayDetail ? `<div><strong>👁 Left the page:</strong></div><ul style="margin:4px 0 8px 18px">${awayDetail}</ul>` : ""}
+        ${copyDetail ? `<div><strong>⎘ Copied text:</strong></div><ul style="margin:4px 0 8px 18px">${copyDetail}</ul>` : ""}
+        ${pasteDetail ? `<div><strong>📋 Pasted in:</strong></div><ul style="margin:4px 0 0 18px">${pasteDetail}</ul>` : ""}
+      </div>` : "";
 
   d.innerHTML = `<div class="row"><h2 style="margin:0">${esc(s.studentName)}</h2><span class="spacer"></span>
       <button class="btn danger" id="del-sub" style="font-size:13px">Delete submission + video</button></div>
@@ -262,6 +274,7 @@ async function openSub(id) {
     ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>pasted text</strong> into the answer box during the session. Compare the transcript against the video to confirm the words were actually spoken.</div>` : ""}
     ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>edited the transcription</strong> of one or more spoken answers. The edited answers below show the original and exactly what changed.</div>` : ""}
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
+    ${integrityDetail}
     ${s.hasVideo ? `<video id="sub-video" controls src="/api/video/${s.id}?key=${encodeURIComponent(KEY)}"></video>
       <div class="footnote" style="margin:6px 0 16px">▸ Click a <strong>▶ time</strong> beside any answer to jump the video to that moment. To keep this past your retention window, download it (right-click → Save) to your external drive, then delete the submission.</div>` :
       (s.videoPurgedAt ? `<div class="banner info">Video was offloaded/removed on ${fmtTZ(s.videoPurgedAt)}. Transcript kept below.</div>` : (s.videoError ? `<div class="banner warn">🎥 ${esc(s.videoError)}</div>` : ""))}

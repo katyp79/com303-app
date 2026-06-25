@@ -190,8 +190,9 @@ app.post("/api/progress", (req, res) => {
       s.history = history;
       s.flaggedEdited = history.some(h => h && h.edited);
     }
-    if (req.body.tabAway != null) s.tabAway = parseInt(req.body.tabAway, 10) || 0;
-    if (req.body.copies != null) s.copies = parseInt(req.body.copies, 10) || 0;
+    if (Array.isArray(req.body.awayEvents)) { s.awayEvents = req.body.awayEvents; s.tabAway = req.body.awayEvents.length; }
+    if (Array.isArray(req.body.copyEvents)) { s.copyEvents = req.body.copyEvents; s.copies = req.body.copyEvents.length; }
+    if (Array.isArray(req.body.pasteEvents)) s.pasteEvents = req.body.pasteEvents;
     s.endedAt = Date.now();
     store.saveSubmission(s);
     res.json({ ok: true });
@@ -232,8 +233,12 @@ app.post("/api/submit", (req, res) => {
     submission.endedAt = parseInt(req.body.endedAt, 10) || Date.now();
     submission.flaggedPaste = !!req.body.flaggedPaste;
     submission.flaggedEdited = Array.isArray(history) && history.some(h => h && h.edited);
-    submission.tabAway = parseInt(req.body.tabAway, 10) || 0;
-    submission.copies = parseInt(req.body.copies, 10) || 0;
+    const parseArr = (s) => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+    submission.awayEvents = parseArr(req.body.awayEvents);
+    submission.copyEvents = parseArr(req.body.copyEvents);
+    submission.pasteEvents = parseArr(req.body.pasteEvents);
+    submission.tabAway = submission.awayEvents.length;
+    submission.copies = submission.copyEvents.length;
     submission.submittedAt = Date.now();
     submission.status = "complete";
 
@@ -276,7 +281,7 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return `"${s.replace(/"/g, '""')}"`;
   };
-  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "EditedTranscript", "TabSwitches", "Copies", "FeedbackShared", "Transcript", "Feedback"];
+  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "EditedTranscript", "TabSwitches", "Copies", "CopiedText", "PastedText", "FeedbackShared", "Transcript", "Feedback"];
   const lines = subs.map(s => {
     const dur = (s.startedAt && s.endedAt) ? Math.round((s.endedAt - s.startedAt) / 1000) : "";
     const transcript = (s.history || []).map(h => `${h.role === "tutor" ? "Coach" : s.studentName}: ${h.text}`).join("\n");
@@ -286,7 +291,9 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
       s.startedAt ? new Date(s.startedAt).toLocaleString() : "",
       dur, new Date(s.submittedAt).toLocaleString(),
       s.grade == null ? "" : s.grade, s.suggestedScore == null ? "" : s.suggestedScore,
-      s.flaggedPaste ? "YES" : "", s.flaggedEdited ? "YES" : "", s.tabAway || 0, s.copies || 0, s.feedbackApproved ? "YES" : "",
+      s.flaggedPaste ? "YES" : "", s.flaggedEdited ? "YES" : "", s.tabAway || 0, s.copies || 0,
+      (s.copyEvents || []).map(c => c.text).join("  |  "), (s.pasteEvents || []).map(p => p.text).join("  |  "),
+      s.feedbackApproved ? "YES" : "",
       transcript, s.feedback || ""
     ].map(q).join(",");
   });

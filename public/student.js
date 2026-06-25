@@ -18,16 +18,30 @@ function saveProgress() {
   if (!sessionId) return;
   fetch("/api/progress", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, assignmentId: ASSIGNMENT_ID, student, history, startedAt: sessionStartedAt, tabAway: tabAwayCount, copies: copyCount })
+    body: JSON.stringify({ sessionId, assignmentId: ASSIGNMENT_ID, student, history, startedAt: sessionStartedAt, awayEvents, copyEvents, pasteEvents })
   }).catch(() => {}); // fire-and-forget; never block the conversation on this
 }
 let sessionActive = false; // true while a conversation is in progress and not yet submitted
 
 // ---- integrity signals (not proof — just "worth a look", paired with the video) ----
-let tabAwayCount = 0;  // times the student switched tabs/apps mid-session (e.g. to look something up)
-let copyCount = 0;     // times the student copied text (e.g. the question, to paste elsewhere)
-document.addEventListener("visibilitychange", () => { if (sessionActive && document.hidden) tabAwayCount++; });
-document.addEventListener("copy", () => { if (sessionActive) copyCount++; });
+let awayEvents = [];   // each time the student left the page: {videoOffsetMs, durationMs, q}
+let copyEvents = [];   // each copy: {text, videoOffsetMs, q}
+let pasteEvents = [];  // each paste into the answer box: {text, videoOffsetMs, q}
+let hiddenAt = null;
+const questionNum = () => history.filter(h => h.role === "tutor").length;
+document.addEventListener("visibilitychange", () => {
+  if (!sessionActive) return;
+  if (document.hidden) hiddenAt = Date.now();
+  else if (hiddenAt) {
+    if (awayEvents.length < 100) awayEvents.push({ videoOffsetMs: hiddenAt - (recordingStartedAt || hiddenAt), durationMs: Date.now() - hiddenAt, q: questionNum() });
+    hiddenAt = null;
+  }
+});
+document.addEventListener("copy", () => {
+  if (!sessionActive || copyEvents.length >= 100) return;
+  const sel = (document.getSelection && document.getSelection().toString()) || "";
+  copyEvents.push({ text: sel.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
+});
 
 // Warn before closing the tab mid-conversation (browsers show a generic confirm dialog).
 window.addEventListener("beforeunload", (e) => {
@@ -214,7 +228,12 @@ $("#answer").addEventListener("input", () => {
     $("#edit-note").style.color = "var(--muted)";
   }
 });
-$("#answer").addEventListener("paste", () => { pasteUsed = true; $("#mic-status").textContent = "Note: pasting is recorded — please speak your answer."; });
+$("#answer").addEventListener("paste", (e) => {
+  pasteUsed = true;
+  const t = (e.clipboardData && e.clipboardData.getData("text")) || "";
+  if (pasteEvents.length < 100) pasteEvents.push({ text: t.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
+  $("#mic-status").textContent = "Note: pasting is recorded — please speak your answer.";
+});
 function updateWC() {
   const n = wordCount($("#answer").value);
   const min = assignment.minWords || 0;
@@ -329,8 +348,9 @@ async function finish() {
   fd.append("endedAt", String(Date.now()));
   fd.append("sessionId", sessionId || "");
   fd.append("flaggedPaste", pasteUsed ? "1" : "");
-  fd.append("tabAway", String(tabAwayCount));
-  fd.append("copies", String(copyCount));
+  fd.append("awayEvents", JSON.stringify(awayEvents));
+  fd.append("copyEvents", JSON.stringify(copyEvents));
+  fd.append("pasteEvents", JSON.stringify(pasteEvents));
   if (blob && blob.size) fd.append("video", blob, "session.webm");
 
   try {
