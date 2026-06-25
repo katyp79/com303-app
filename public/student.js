@@ -92,7 +92,7 @@ let manuallyEdited = false; // true only when the student actually types/edits (
   } else {
     // Hard stop: this browser can't do voice. Don't let them start, and don't invite typing.
     sn.className = "banner err";
-    sn.innerHTML = "🚫 <strong>This browser won't work for this assignment.</strong> It can't record spoken answers.<br><br>Please open this same link in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a computer, and begin there. <span class='footnote'>(Firefox, Safari, and phone browsers are not supported.)</span>";
+    sn.innerHTML = "🚫 <strong>This browser won't work for this assignment.</strong> It can't record spoken answers.<br><br>Please open this same link in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a computer, and begin there. <span class='footnote'>(Chrome or Edge on a computer is the most reliable. Firefox isn't supported.)</span>";
     $("#begin-btn").disabled = true;
     $("#begin-btn").textContent = "Open in Chrome or Edge to begin";
   }
