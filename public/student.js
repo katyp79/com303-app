@@ -227,13 +227,14 @@ function enableAnswering() {
     $("#mic-status").textContent = "Get ready — recording will start automatically.";
     waitTimer = setInterval(() => {
       left--;
-      if (left <= 0) { clearInterval(waitTimer); waitTimer = null; cd.style.display = "none"; if (!listening) startListening(); }
+      if (left <= 0) { clearInterval(waitTimer); waitTimer = null; cd.style.display = "none"; if (!listening) startListening(); startAnswerLimit(); }
       else cd.textContent = `Take a moment to think — recording starts in ${left}s (or click the mic to start now).`;
     }, 1000);
   } else {
     setMic(true, "…");
     $("#mic-status").textContent = "Recording starts automatically — just speak. Click Stop when you're done.";
     setTimeout(() => { if (!listening) startListening(); }, 500); // auto-start after the coach finishes
+    startAnswerLimit(); // the per-answer countdown begins now
   }
 }
 
@@ -321,12 +322,17 @@ function stopListening() {
   $("#mic-status").textContent = "Review your answer, then Send (or keep talking).";
 }
 
-// ---------- send answer ----------
-$("#send-btn").addEventListener("click", () => {
-  const ans = $("#answer").value.trim();
-  if (!ans) return toast("Say or type an answer first");
+// ---------- send answer (manual, or forced when the time limit runs out) ----------
+$("#send-btn").addEventListener("click", () => submitAnswer(false));
+function submitAnswer(forced) {
+  let ans = $("#answer").value.trim();
   const min = assignment.minWords || 0;
-  if (wordCount(ans) < min) return toast(`Please give a fuller answer (at least ${min} words).`);
+  if (!forced) {
+    if (!ans) return toast("Say or type an answer first");
+    if (wordCount(ans) < min) return toast(`Please give a fuller answer (at least ${min} words).`);
+  }
+  if (forced && !ans) ans = "(no answer given before the time limit)";
+  clearAnswerLimit();
   stopListening();
   const spoken = recognizedText.replace(/\s+/g, " ").trim();
   // only flag as edited if the student ACTUALLY typed/edited AND the result differs from speech
@@ -336,8 +342,32 @@ $("#send-btn").addEventListener("click", () => {
   saveProgress();
   $("#answer").value = ""; updateWC();
   setMic(false, "…");
+  if (forced) toast("Time's up — sending your answer.");
   coachTurn();
-});
+}
+
+// ---------- per-answer time limit ----------
+let answerLimitTimer = null;
+function clearAnswerLimit() {
+  if (answerLimitTimer) { clearInterval(answerLimitTimer); answerLimitTimer = null; }
+  const el = $("#answer-timer"); if (el) el.textContent = "";
+}
+function startAnswerLimit() {
+  clearAnswerLimit();
+  const limit = assignment.answerLimit || 0; // seconds; 0 = no limit
+  const el = $("#answer-timer");
+  if (!limit || !el) return;
+  let left = limit;
+  const tick = () => {
+    const m = Math.floor(left / 60), s = left % 60;
+    el.textContent = "⏱ " + m + ":" + String(s).padStart(2, "0") + " left to answer";
+    el.style.color = left <= 15 ? "var(--danger)" : "var(--muted)";
+    if (left <= 0) { clearAnswerLimit(); submitAnswer(true); return; }
+    left--;
+  };
+  tick();
+  answerLimitTimer = setInterval(tick, 1000);
+}
 
 // ---------- text-to-speech ----------
 function speak(text, done) {
@@ -400,6 +430,7 @@ async function finish() {
   if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
   sessionActive = false; // submitted — safe to leave the page now
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  clearAnswerLimit();
 }
 function stopRecording() {
   const stopOne = (rec, chunks, fallbackType) => new Promise(resolve => {

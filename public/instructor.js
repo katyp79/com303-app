@@ -130,6 +130,7 @@ $("#save-btn").addEventListener("click", async () => {
   fd.append("feedbackMode", $("#f-feedback").value);
   fd.append("showReading", $("#f-showreading").value);
   fd.append("waitingTime", $("#f-waiting").value);
+  fd.append("answerLimit", $("#f-answerlimit").value);
 
   if (currentSrc() === "pdf") {
     if (!fpdf.files[0] && !editingId) return toast("Choose a PDF (or switch to Paste text)");
@@ -186,6 +187,7 @@ async function editAssignment(id) {
   $("#f-camera").value = String(a.requireCamera); $("#f-feedback").value = a.feedbackMode;
   $("#f-showreading").value = String(!!a.showReading);
   $("#f-waiting").value = String(a.waitingTime || 0);
+  $("#f-answerlimit").value = String(a.answerLimit || 0);
   $("#edit-note").textContent = "Editing “" + a.title + "”. Re-upload the PDF only if you want to change the material.";
 }
 

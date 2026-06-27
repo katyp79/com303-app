@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>COM 303 · Instructor</title>
-<link rel="stylesheet" href="app.css?v=11"/>
+<link rel="stylesheet" href="app.css?v=12"/>
 </head>
 <body>
 <header class="top">
@@ -131,7 +131,19 @@
             <option value="60">60 seconds (like Sherpa)</option>
           </select>
         </div>
+        <div>
+          <label>Max time per answer</label>
+          <select id="f-answerlimit">
+            <option value="0" selected>No limit</option>
+            <option value="60">1 minute</option>
+            <option value="90">1.5 minutes</option>
+            <option value="120">2 minutes</option>
+            <option value="180">3 minutes</option>
+            <option value="300">5 minutes</option>
+          </select>
+        </div>
       </div>
+      <p class="hint" style="margin-top:6px">⏱ "Max time per answer" caps each response — when the countdown hits zero, the student's answer auto-submits and the conversation moves on. (Think time is separate, before recording starts.)</p>
       <p class="hint" style="margin-top:6px">⚠️ If you paste a detailed "discussion source" / answer-key style document, keep this <strong>No</strong> — otherwise students could read the answers. Students should have gone through the actual module material beforehand.</p>
 
       <div class="row" style="margin-top:22px">
@@ -169,6 +181,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="instructor.js?v=11"></script>
+<script src="instructor.js?v=12"></script>
 </body>
 </html>
