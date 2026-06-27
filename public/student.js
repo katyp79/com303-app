@@ -357,16 +357,24 @@ function startAnswerLimit() {
   const limit = assignment.answerLimit || 0; // seconds; 0 = no limit
   const el = $("#answer-timer");
   if (!limit || !el) return;
+  // Subtle by design: a gentle note up front, and the live countdown only appears near the end.
+  const warnAt = Math.min(120, Math.max(15, Math.round(limit * 0.3)));
+  const human = limit >= 60
+    ? (limit % 60 === 0 ? (limit / 60) + ((limit / 60) === 1 ? " minute" : " minutes") : (limit / 60).toFixed(1).replace(/\.0$/, "") + " minutes")
+    : limit + " seconds";
+  el.style.color = "var(--muted)"; el.style.fontWeight = "400";
+  el.textContent = "You have up to " + human + " for this answer — take your time.";
   let left = limit;
-  const tick = () => {
-    const m = Math.floor(left / 60), s = left % 60;
-    el.textContent = "⏱ " + m + ":" + String(s).padStart(2, "0") + " left to answer";
-    el.style.color = left <= 15 ? "var(--danger)" : "var(--muted)";
-    if (left <= 0) { clearAnswerLimit(); submitAnswer(true); return; }
+  answerLimitTimer = setInterval(() => {
     left--;
-  };
-  tick();
-  answerLimitTimer = setInterval(tick, 1000);
+    if (left <= 0) { clearAnswerLimit(); submitAnswer(true); return; }
+    if (left <= warnAt) { // only now show the ticking clock
+      const m = Math.floor(left / 60), s = left % 60;
+      el.textContent = "⏱ " + m + ":" + String(s).padStart(2, "0") + " left";
+      el.style.fontWeight = "600";
+      el.style.color = left <= 15 ? "var(--danger)" : "var(--warn)";
+    }
+  }, 1000);
 }
 
 // ---------- text-to-speech ----------
