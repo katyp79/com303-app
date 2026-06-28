@@ -244,7 +244,7 @@ function enableAnswering() {
     $("#mic-status").textContent = "Get ready — recording will start automatically.";
     waitTimer = setInterval(() => {
       left--;
-      if (left <= 0) { clearInterval(waitTimer); waitTimer = null; cd.style.display = "none"; if (!listening) startListening(); startAnswerLimit(); }
+      if (left <= 0) { clearInterval(waitTimer); waitTimer = null; cd.style.display = "none"; if (!listening) startListening(); startAnswerLimit(); startAnswerWindow(); }
       else cd.textContent = `Take a moment to think — recording starts in ${left}s (or click the mic to start now).`;
     }, 1000);
   } else {
@@ -252,6 +252,7 @@ function enableAnswering() {
     $("#mic-status").textContent = "Recording starts automatically — just speak. Click Stop when you're done.";
     setTimeout(() => { if (!listening) startListening(); }, 500); // auto-start after the coach finishes
     startAnswerLimit(); // the per-answer countdown begins now
+    startAnswerWindow(); // and the "must start speaking" window
   }
 }
 
@@ -345,15 +346,16 @@ function stopListening() {
 
 // ---------- send answer (manual, or forced when the time limit runs out) ----------
 $("#send-btn").addEventListener("click", () => submitAnswer(false));
-function submitAnswer(forced) {
+function submitAnswer(forced, emptyMsg) {
   let ans = $("#answer").value.trim();
   const min = assignment.minWords || 0;
   if (!forced) {
     if (!ans) return toast("Say or type an answer first");
     if (wordCount(ans) < min) return toast(`Please give a fuller answer (at least ${min} words).`);
   }
-  if (forced && !ans) ans = "(no answer given before the time limit)";
+  if (forced && !ans) ans = emptyMsg || "(no answer given before the time limit)";
   clearAnswerLimit();
+  clearAnswerWindow();
   stopListening();
   const spoken = recognizedText.replace(/\s+/g, " ").trim();
   // only flag as edited if the student ACTUALLY typed/edited AND the result differs from speech
@@ -365,6 +367,21 @@ function submitAnswer(forced) {
   setMic(false, "…");
   if (forced) toast("Time's up — sending your answer.");
   coachTurn();
+}
+
+// ---------- answer window: must START speaking within N seconds (no sitting silently) ----------
+let answerWindowTimer = null;
+function clearAnswerWindow() { if (answerWindowTimer) { clearTimeout(answerWindowTimer); answerWindowTimer = null; } }
+function startAnswerWindow() {
+  clearAnswerWindow();
+  const w = assignment.answerWindow || 0; // seconds; 0 = off
+  if (!w) return;
+  answerWindowTimer = setTimeout(() => {
+    if (answerFirstWordAt == null) { // they never began speaking — move the session along
+      toast("No answer detected — moving on.");
+      submitAnswer(true, "(no answer — the student did not begin speaking within the time allowed)");
+    }
+  }, w * 1000);
 }
 
 // ---------- per-answer time limit ----------
@@ -472,6 +489,7 @@ async function finish() {
   sessionActive = false; // submitted — safe to leave the page now
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
   clearAnswerLimit();
+  clearAnswerWindow();
 }
 function stopRecording() {
   const stopOne = (rec, chunks, fallbackType) => new Promise(resolve => {

@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>COM 303 · Instructor</title>
-<link rel="stylesheet" href="app.css?v=15"/>
+<link rel="stylesheet" href="app.css?v=16"/>
 </head>
 <body>
 <header class="top">
@@ -143,8 +143,19 @@
             <option value="600">10 minutes</option>
           </select>
         </div>
+        <div>
+          <label>Must start answering within</label>
+          <select id="f-answerwindow">
+            <option value="0" selected>Off — no silence limit</option>
+            <option value="30">30 seconds</option>
+            <option value="45">45 seconds</option>
+            <option value="60">60 seconds</option>
+            <option value="90">90 seconds</option>
+          </select>
+        </div>
       </div>
       <p class="hint" style="margin-top:6px">⏱ "Max time per answer" caps each response. Students see a gentle note up front ("you have up to X minutes — take your time"); a live countdown only appears near the end, and when it reaches zero the answer auto-submits and the conversation moves on. (Think time is separate, before recording starts.)</p>
+      <p class="hint" style="margin-top:6px">🔇 "Must start answering within" stops a student from sitting silently. If they haven't begun <em>speaking</em> within this window after a question, it auto-advances and records "(no answer — didn't begin speaking)". Counts from when recording starts (after think time).</p>
       <p class="hint" style="margin-top:6px">⚠️ If you paste a detailed "discussion source" / answer-key style document, keep this <strong>No</strong> — otherwise students could read the answers. Students should have gone through the actual module material beforehand.</p>
 
       <div class="row" style="margin-top:22px">
@@ -182,6 +193,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="instructor.js?v=15"></script>
+<script src="instructor.js?v=16"></script>
 </body>
 </html>

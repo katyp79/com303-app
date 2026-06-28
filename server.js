@@ -107,6 +107,7 @@ app.post("/api/assignments", requireInstructor, uploadPdf.single("pdf"), async (
       feedbackMode: b.feedbackMode || "approve", // 'approve' | 'immediate'
       waitingTime: parseInt(b.waitingTime || "0", 10),
       answerLimit: parseInt(b.answerLimit || "0", 10),
+      answerWindow: parseInt(b.answerWindow || "0", 10),
       minWords: parseInt(b.minWords || "10", 10),
       maxQuestions: parseInt(b.maxQuestions || "5", 10),
       createdAt: store.getAssignment(b.id)?.createdAt || Date.now()
@@ -139,7 +140,8 @@ app.get("/api/assignments/:id/run", (req, res) => {
     readingText: a.showReading ? a.readingText : "",
     showReading: !!a.showReading,
     requireCamera: a.requireCamera, waitingTime: a.waitingTime, minWords: a.minWords,
-    answerLimit: a.answerLimit || 0
+    answerLimit: a.answerLimit || 0,
+    answerWindow: a.answerWindow || 0
   });
 });
 

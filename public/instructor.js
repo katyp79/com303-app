@@ -131,6 +131,7 @@ $("#save-btn").addEventListener("click", async () => {
   fd.append("showReading", $("#f-showreading").value);
   fd.append("waitingTime", $("#f-waiting").value);
   fd.append("answerLimit", $("#f-answerlimit").value);
+  fd.append("answerWindow", $("#f-answerwindow").value);
 
   if (currentSrc() === "pdf") {
     if (!fpdf.files[0] && !editingId) return toast("Choose a PDF (or switch to Paste text)");
@@ -188,6 +189,7 @@ async function editAssignment(id) {
   $("#f-showreading").value = String(!!a.showReading);
   $("#f-waiting").value = String(a.waitingTime || 0);
   $("#f-answerlimit").value = String(a.answerLimit || 0);
+  $("#f-answerwindow").value = String(a.answerWindow || 0);
   $("#edit-note").textContent = "Editing “" + a.title + "”. Re-upload the PDF only if you want to change the material.";
 }
 
@@ -322,8 +324,11 @@ async function openSub(id) {
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${integrityDetail}
     ${navBar}
-    ${s.hasVideo ? `<video id="sub-video" controls src="/api/video/${s.id}?key=${encodeURIComponent(KEY)}"></video>
-      <div class="footnote" style="margin:6px 0 16px">▸ Click a <strong>▶ time</strong> beside any answer to jump the video to that moment. To keep this past your retention window, download it (right-click → Save) to your external drive, then delete the submission.</div>` :
+    ${s.hasVideo ? `<video id="sub-video" controls preload="auto" src="/api/video/${s.id}?key=${encodeURIComponent(KEY)}"></video>
+      <div class="row" style="margin:6px 0 16px;align-items:center">
+        <a class="btn subtle" style="font-size:13px" href="/api/video/${s.id}?key=${encodeURIComponent(KEY)}" download="${esc((s.studentName || "student").replace(/[^a-z0-9]+/gi, "_"))}_${esc((s.assignmentTitle || "session").replace(/[^a-z0-9]+/gi, "_"))}.webm">⬇ Download this video</a>
+        <span class="footnote" style="flex:1">▸ Click a <strong>▶ time</strong> beside any answer (or a <strong>Q#</strong> above) to jump the video there. Download to your external drive to keep it past your retention window, then delete the submission.</span>
+      </div>` :
       (s.videoPurgedAt ? `<div class="banner info">Video was offloaded/removed on ${fmtTZ(s.videoPurgedAt)}. Transcript kept below.</div>` : (s.videoError ? `<div class="banner warn">🎥 ${esc(s.videoError)}</div>` : ""))}
     ${s.hasAudio ? `<div style="margin:6px 0 16px"><div class="footnote" style="margin-bottom:4px">🔊 Audio backup${s.hasVideo ? "" : " — no video was captured, but here's the audio of what they said"}:</div><audio controls src="/api/audio/${s.id}?key=${encodeURIComponent(KEY)}" style="width:100%"></audio></div>` : ""}
     <h3>Transcript</h3><div class="reading-box">${transcript || "(empty)"}</div>
@@ -357,10 +362,33 @@ async function openSub(id) {
     await api("/api/submissions/" + id + "/grade", { json: true, method: "POST", body: JSON.stringify({ grade: $("#grade-input").value }) });
     $("#grade-status").textContent = "saved ✓"; toast("Grade saved"); loadSubmissions();
   };
+  // MediaRecorder .webm files often report duration:Infinity, which makes the browser unable to
+  // seek (clicking a timestamp "freezes"). Force the browser to compute the real duration first.
+  const vid = $("#sub-video");
+  if (vid) {
+    const fixDuration = () => {
+      if (vid.duration === Infinity || isNaN(vid.duration)) {
+        const wasMuted = vid.muted; vid.muted = true;
+        const onUpd = () => { vid.removeEventListener("timeupdate", onUpd); try { vid.currentTime = 0; } catch {} vid.muted = wasMuted; };
+        vid.addEventListener("timeupdate", onUpd);
+        try { vid.currentTime = 1e101; } catch {}
+      }
+    };
+    if (vid.readyState >= 1) fixDuration(); else vid.addEventListener("loadedmetadata", fixDuration, { once: true });
+  }
+  const seekVideo = off => {
+    const v = $("#sub-video"); if (!v) return;
+    const go = () => { try { v.currentTime = off; } catch {} v.play().catch(() => {}); };
+    if (v.duration === Infinity || isNaN(v.duration)) {
+      // duration not computed yet — wait for it, then seek (prevents the freeze)
+      const onCanSeek = () => { v.removeEventListener("durationchange", onCanSeek); go(); };
+      v.addEventListener("durationchange", onCanSeek); try { v.currentTime = 1e101; } catch {}
+    } else go();
+  };
   d.querySelectorAll(".vjump").forEach(a => a.onclick = ev => {
     ev.preventDefault();
     const v = $("#sub-video"); if (!v) return;
-    v.currentTime = parseFloat(a.dataset.off) || 0; v.play();
+    seekVideo(parseFloat(a.dataset.off) || 0);
     if (v.scrollIntoView) v.scrollIntoView({ behavior: "smooth", block: "center" });
   });
   // question-to-question navigation: jump the video AND scroll/highlight that exchange
@@ -371,8 +399,7 @@ async function openSub(id) {
     curQ = idx;
     const a = chips[idx];
     chips.forEach(c => c.classList.toggle("active", c === a));
-    const v = $("#sub-video");
-    if (v && a.dataset.off != null) { v.currentTime = parseFloat(a.dataset.off) || 0; v.play().catch(() => {}); }
+    if (a.dataset.off != null) seekVideo(parseFloat(a.dataset.off) || 0);
     const line = a.dataset.line && document.getElementById(a.dataset.line);
     if (line) {
       line.scrollIntoView({ behavior: "smooth", block: "center" });
