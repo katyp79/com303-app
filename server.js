@@ -193,7 +193,7 @@ app.post("/api/progress", (req, res) => {
         studentId: (student && student.id) || "",
         history: [], videoFile: null, videoError: null,
         startedAt: startedAt || Date.now(), endedAt: null,
-        flaggedPaste: false, flaggedEdited: false, submittedAt: Date.now(),
+        flaggedPaste: false, flaggedTimeOver: false, flaggedEdited: false, submittedAt: Date.now(),
         feedback: null, suggestedScore: null, scoreRationale: "", grade: null,
         feedbackApproved: false, status: "in-progress"
       };
@@ -247,6 +247,7 @@ app.post("/api/submit", (req, res) => {
     submission.startedAt = parseInt(req.body.startedAt, 10) || submission.startedAt || null;
     submission.endedAt = parseInt(req.body.endedAt, 10) || Date.now();
     submission.flaggedPaste = !!req.body.flaggedPaste;
+    submission.flaggedTimeOver = !!req.body.flaggedTimeOver;
     submission.flaggedEdited = Array.isArray(history) && history.some(h => h && h.edited);
     const parseArr = (s) => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
     submission.awayEvents = parseArr(req.body.awayEvents);
@@ -298,7 +299,7 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return `"${s.replace(/"/g, '""')}"`;
   };
-  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "EditedTranscript", "TabSwitches", "Copies", "CopiedText", "PastedText", "FeedbackShared", "Transcript", "Feedback"];
+  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "FlaggedTimeOver", "EditedTranscript", "TabSwitches", "Copies", "CopiedText", "PastedText", "FeedbackShared", "Transcript", "Feedback"];
   const lines = subs.map(s => {
     const dur = (s.startedAt && s.endedAt) ? Math.round((s.endedAt - s.startedAt) / 1000) : "";
     const transcript = (s.history || []).map(h => `${h.role === "tutor" ? "Coach" : s.studentName}: ${h.text}`).join("\n");
@@ -308,7 +309,7 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
       s.startedAt ? new Date(s.startedAt).toLocaleString() : "",
       dur, new Date(s.submittedAt).toLocaleString(),
       s.grade == null ? "" : s.grade, s.suggestedScore == null ? "" : s.suggestedScore,
-      s.flaggedPaste ? "YES" : "", s.flaggedEdited ? "YES" : "", s.tabAway || 0, s.copies || 0,
+      s.flaggedPaste ? "YES" : "", s.flaggedTimeOver ? "YES" : "", s.flaggedEdited ? "YES" : "", s.tabAway || 0, s.copies || 0,
       (s.copyEvents || []).map(c => c.text).join("  |  "), (s.pasteEvents || []).map(p => p.text).join("  |  "),
       s.feedbackApproved ? "YES" : "",
       transcript, s.feedback || ""

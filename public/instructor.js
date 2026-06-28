@@ -292,7 +292,8 @@ async function openSub(id) {
     <p class="meta">${s.studentEmail ? "✉ " + esc(s.studentEmail) + " · " : ""}${s.studentId ? "ID " + esc(s.studentId) : ""}</p>
     <p class="meta">🕒 Started ${startStr}${dur} · submitted ${fmtTZ(s.submittedAt)}</p>
     ${s.status === "in-progress" ? `<div class="banner warn">⏳ <strong>Not submitted.</strong> This attempt was autosaved but never completed — the student likely closed the tab or their device crashed mid-conversation. The partial transcript is below; there's no video or AI feedback for it. They may have a separate completed attempt.</div>` : ""}
-    ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>pasted text</strong> into the answer box during the session. Compare the transcript against the video to confirm the words were actually spoken.</div>` : ""}
+    ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>tried to paste text</strong> into the answer box (pasting is blocked, but the attempt and the text are logged below). Compare the transcript against the video.</div>` : ""}
+    ${s.flaggedTimeOver ? `<div class="banner warn">⏱ This student <strong>went over the per-answer time limit</strong> on at least one question. A signal to look closer at pacing — not an automatic penalty.</div>` : ""}
     ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>edited the transcription</strong> of one or more spoken answers. The edited answers below show the original and exactly what changed.</div>` : ""}
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${integrityDetail}

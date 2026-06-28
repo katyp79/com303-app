@@ -63,6 +63,7 @@ let recog = null, listening = false, waitTimer = null;
 let recognizedText = ""; // the raw speech-to-text for the CURRENT answer (the "original")
 let busy = false;
 let pasteUsed = false; // flags if the student pasted into the answer box (integrity signal)
+let timeOverFlag = false; // flags if the student went past the per-answer time limit on any answer
 let manuallyEdited = false; // true only when the student actually types/edits (not the speech engine)
 
 // ---------- load assignment ----------
@@ -109,13 +110,28 @@ $("#begin-btn").addEventListener("click", async () => {
   if (!/@([a-z0-9-]+\.)*(uw|washington)\.edu$/i.test(student.email)) return toast("Please enter your UW email (e.g. netid@uw.edu)");
   if (!student.id) return toast("Please enter your student ID number");
 
+  if (!$("#agree-rules") || !$("#agree-rules").checked) return toast("Please read the ground rules and check the box to begin.");
+
+  // AV is non-optional: a reliable recording is what lets your instructor resolve any question later.
   const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-  if (assignment.requireCamera) {
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: audioConstraints });
-    } catch { return toast("Camera/microphone access is required for this assignment."); }
-  } else {
-    try { mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints }); } catch {}
+  const wantVideo = assignment.requireCamera !== false; // record video unless the instructor turned camera off
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia(
+      wantVideo ? { video: true, audio: audioConstraints } : { audio: audioConstraints }
+    );
+  } catch {
+    return toast(wantVideo
+      ? "This assignment is recorded. Please ALLOW camera and microphone when your browser asks, then click Begin again."
+      : "This assignment is recorded. Please ALLOW microphone access when your browser asks, then click Begin again.");
+  }
+  if (!mediaStream || !mediaStream.getAudioTracks().length) {
+    return toast("No microphone was detected. Please connect or enable a mic, then click Begin again.");
+  }
+  if (wantVideo && !mediaStream.getVideoTracks().length) {
+    return toast("No camera was detected. Please enable your camera, then click Begin again.");
+  }
+  if (!window.MediaRecorder) {
+    return toast("This browser can't record. Please use Chrome or Edge on a computer.");
   }
 
   $("#cam").srcObject = mediaStream;
@@ -138,7 +154,7 @@ $("#begin-btn").addEventListener("click", async () => {
       mediaRecorder.start(1000);
       recordingStartedAt = Date.now();
       $("#recdot").style.display = "inline-block";
-      $("#cam-status").textContent = assignment.requireCamera ? "Recording video" : "Recording audio";
+      $("#cam-status").textContent = wantVideo ? "Recording video" : "Recording audio";
     } catch (e) { $("#cam-status").textContent = "Recording unavailable"; }
 
     // Separate audio-only backup — survives even if the video recording fails (common on Safari).
@@ -262,11 +278,14 @@ $("#answer").addEventListener("input", () => {
   }
 });
 $("#answer").addEventListener("paste", (e) => {
+  e.preventDefault(); // pasting is disabled — this is a spoken answer. Still logged for the instructor.
   pasteUsed = true;
   const t = (e.clipboardData && e.clipboardData.getData("text")) || "";
   if (pasteEvents.length < 100) pasteEvents.push({ text: t.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
-  $("#mic-status").textContent = "Note: pasting is recorded — please speak your answer.";
+  $("#mic-status").textContent = "⚠ Pasting is disabled — please speak your answer.";
+  toast("Pasting isn't allowed here — please speak your answer.");
 });
+$("#answer").addEventListener("drop", (e) => { e.preventDefault(); toast("Dropping text isn't allowed — please speak your answer."); });
 function updateWC() {
   const n = wordCount($("#answer").value);
   const min = assignment.minWords || 0;
@@ -352,28 +371,39 @@ function clearAnswerLimit() {
   if (answerLimitTimer) { clearInterval(answerLimitTimer); answerLimitTimer = null; }
   const el = $("#answer-timer"); if (el) el.textContent = "";
 }
+const GRACE_SECONDS = 75; // soft cap: after the limit, this much extra before an auto-send backstop
 function startAnswerLimit() {
   clearAnswerLimit();
   const limit = assignment.answerLimit || 0; // seconds; 0 = no limit
   const el = $("#answer-timer");
   if (!limit || !el) return;
-  // Subtle by design: a gentle note up front, and the live countdown only appears near the end.
+  // Subtle by design: a gentle note up front, the live countdown only near the end, and at the
+  // limit a soft "wrap up" nudge (never a mid-sentence cutoff). A grace backstop ends a stalled
+  // session so it can't run forever. Going over is a FLAG for the instructor, not an auto-penalty.
   const warnAt = Math.min(120, Math.max(15, Math.round(limit * 0.3)));
   const human = limit >= 60
     ? (limit % 60 === 0 ? (limit / 60) + ((limit / 60) === 1 ? " minute" : " minutes") : (limit / 60).toFixed(1).replace(/\.0$/, "") + " minutes")
     : limit + " seconds";
   el.style.color = "var(--muted)"; el.style.fontWeight = "400";
   el.textContent = "You have up to " + human + " for this answer — take your time.";
-  let left = limit;
+  let left = limit, over = 0;
   answerLimitTimer = setInterval(() => {
-    left--;
-    if (left <= 0) { clearAnswerLimit(); submitAnswer(true); return; }
-    if (left <= warnAt) { // only now show the ticking clock
-      const m = Math.floor(left / 60), s = left % 60;
-      el.textContent = "⏱ " + m + ":" + String(s).padStart(2, "0") + " left";
-      el.style.fontWeight = "600";
-      el.style.color = left <= 15 ? "var(--danger)" : "var(--warn)";
+    if (left > 0) {
+      left--;
+      if (left <= warnAt) { // only now show the ticking clock — calm, not alarming
+        const m = Math.floor(left / 60), s = left % 60;
+        el.textContent = "⏱ " + m + ":" + String(s).padStart(2, "0") + " left";
+        el.style.fontWeight = "600";
+        el.style.color = left <= 15 ? "var(--warn)" : "var(--muted)";
+      }
+      return;
     }
+    // Past the suggested time: gentle nudge, no cutoff. Flag it once.
+    if (over === 0) { timeOverFlag = true; }
+    over++;
+    el.style.fontWeight = "600"; el.style.color = "var(--danger)";
+    el.textContent = "⏱ Time to wrap up — please finish your thought and click Send.";
+    if (over >= GRACE_SECONDS) { clearAnswerLimit(); submitAnswer(true); } // backstop for a stalled session
   }, 1000);
 }
 
@@ -418,6 +448,7 @@ async function finish() {
   fd.append("endedAt", String(Date.now()));
   fd.append("sessionId", sessionId || "");
   fd.append("flaggedPaste", pasteUsed ? "1" : "");
+  fd.append("flaggedTimeOver", timeOverFlag ? "1" : "");
   fd.append("awayEvents", JSON.stringify(awayEvents));
   fd.append("copyEvents", JSON.stringify(copyEvents));
   fd.append("pasteEvents", JSON.stringify(pasteEvents));

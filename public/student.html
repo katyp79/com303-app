@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>COM 303 · Reading Conversation</title>
-<link rel="stylesheet" href="app.css?v=13"/>
+<link rel="stylesheet" href="app.css?v=14"/>
 </head>
 <body>
 <header class="top">
@@ -26,6 +26,20 @@
     </details>
 
     <div id="cam-note" class="banner info" style="display:none">🎥 This assignment records video. When you begin, your browser will ask to use your camera and microphone — please allow both.</div>
+
+    <div class="banner warn" id="rules-box" style="display:block;text-align:left">
+      <strong>📋 Before you begin — please read</strong>
+      <p style="margin:8px 0 6px">This is a <strong>live, recorded spoken assessment</strong> of your understanding of the module material. Ground rules:</p>
+      <ul style="margin:0 0 8px 18px;padding:0">
+        <li>Answer <strong>out loud, in your own words</strong>, from what you learned. You may glance at your own notes.</li>
+        <li><strong>Do not</strong> read answers aloud, paste text, switch to other apps or tabs, or use AI tools or another person. This is recorded and monitored — it will be obvious and it will lower your score.</li>
+        <li>Your <strong>video, audio, and transcript are recorded</strong> and reviewed by your instructor.</li>
+        <li><strong>Prepare before you start</strong> — you can't look things up mid-conversation, and there's a time limit per question.</li>
+      </ul>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:650;cursor:pointer;margin:0">
+        <input type="checkbox" id="agree-rules" style="width:auto;margin:0"/> I understand, and I'll answer on my own.
+      </label>
+    </div>
 
     <label>Your name <span class="req">*</span></label>
     <input type="text" id="s-name" placeholder="First and last name"/>
@@ -80,6 +94,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="student.js?v=13"></script>
+<script src="student.js?v=14"></script>
 </body>
 </html>
