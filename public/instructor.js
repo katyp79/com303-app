@@ -152,6 +152,11 @@ $("#save-btn").addEventListener("click", async () => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "save failed");
     toast(editingId ? "Updated" : "Saved" + (d.wordCount ? ` · ${d.wordCount.toLocaleString()} words read` : ""));
+    if (d.conceptWarnings && d.conceptWarnings.length) {
+      alert("Saved — but heads up: the source document doesn't appear to cover these concept(s):\n\n• " +
+        d.conceptWarnings.join("\n• ") +
+        "\n\nThe coach can only ask about what's in the source doc, so add coverage for these (or check the wording matches) before students start.");
+    }
     resetForm(); switchView("assignments");
   } catch (e) { toast(e.message); }
   finally { $("#save-btn").disabled = false; $("#save-btn").textContent = "Save assignment"; }
@@ -291,8 +296,8 @@ async function openSub(id) {
     let edited = "";
     if (h.role === "student" && h.edited && h.spoken) {
       edited = `<div class="meta" style="margin:4px 0 0 14px;padding-left:8px;border-left:2px solid var(--warn)">`
-        + `<span class="pill warn">✎ edited</span> originally transcribed: “${esc(h.spoken)}”`
-        + `<div style="margin-top:2px">changes: ${wordDiff(h.spoken, h.text)}</div></div>`;
+        + `<span class="pill warn">✎ student-edited</span> The student manually changed the auto-transcript. Auto-transcribed speech was: “${esc(h.spoken)}”`
+        + `<div style="margin-top:2px">their changes: ${wordDiff(h.spoken, h.text)}</div></div>`;
     }
     return `<div class="transcript-line"${lineId ? ` id="${lineId}"` : ""}><span class="who">${who}:</span> ${esc(h.text)}${t}${resp}${jump}${edited}</div>`;
   }).join("");
@@ -341,7 +346,7 @@ async function openSub(id) {
     ${s.status === "in-progress" ? `<div class="banner warn">⏳ <strong>Not submitted.</strong> This attempt was autosaved but never completed — the student likely closed the tab or their device crashed mid-conversation. The partial transcript is below; there's no video or AI feedback for it. They may have a separate completed attempt.</div>` : ""}
     ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>tried to paste text</strong> into the answer box (pasting is blocked, but the attempt and the text are logged below). Compare the transcript against the video.</div>` : ""}
     ${s.flaggedTimeOver ? `<div class="banner warn">⏱ This student <strong>went over the per-answer time limit</strong> on at least one question. A signal to look closer at pacing — not an automatic penalty.</div>` : ""}
-    ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>edited the transcription</strong> of one or more spoken answers. The edited answers below show the original and exactly what changed.</div>` : ""}
+    ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>manually edited the auto-transcript</strong> of one or more spoken answers (this is a student action, not automatic transcription cleanup). The edited answers below show the original speech-to-text and exactly what the student changed.</div>` : ""}
     ${avBanner}
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${integrityDetail}
@@ -353,7 +358,9 @@ async function openSub(id) {
       </div>` :
       (s.videoPurgedAt ? `<div class="banner info">Video was offloaded/removed on ${fmtTZ(s.videoPurgedAt)}. Transcript kept below.</div>` : (s.videoError ? `<div class="banner warn">🎥 ${esc(s.videoError)}</div>` : ""))}
     ${s.hasAudio ? `<div style="margin:6px 0 16px"><div class="footnote" style="margin-bottom:4px">🔊 Audio backup${s.hasVideo ? "" : " — no video was captured, but here's the audio of what they said"}:</div><audio controls src="/api/audio/${s.id}?key=${encodeURIComponent(KEY)}" style="width:100%"></audio></div>` : ""}
-    <h3>Transcript</h3><div class="reading-box">${transcript || "(empty)"}</div>
+    <h3>Transcript</h3>
+    <p class="footnote" style="margin:-4px 0 8px">Student answers are <strong>auto-transcribed from speech</strong>. Anything the student then hand-edited is flagged <span class="pill warn">✎ student-edited</span> with the original speech-to-text and the change; everything else is the raw transcription.</p>
+    <div class="reading-box">${transcript || "(empty)"}</div>
     <h3 style="margin-top:18px">AI feedback (for you to review)</h3>
     <textarea id="fb-text" rows="7">${esc(s.feedback || "")}</textarea>
     <div class="row" style="margin-top:10px">

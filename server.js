@@ -10,6 +10,38 @@ const store = require("./lib/store");
 const pdf = require("./lib/pdf");
 const claude = require("./lib/claude");
 
+// Normalize typographic glyphs in a source document to ASCII-safe equivalents (per #10),
+// so smart quotes / em-dashes / bullets / zero-width chars can't corrupt the coach's source text.
+function normalizeSourceDoc(text) {
+  if (!text) return text;
+  return text
+    .replace(/[“”„‟″‶]/g, '"')         // smart double quotes
+    .replace(/[‘’‚‛′‵]/g, "'")         // smart single quotes / apostrophes
+    .replace(/—/g, "--")                                        // em dash
+    .replace(/[–‒‐‑]/g, "-")                     // en/figure dash, non-breaking hyphen
+    .replace(/…/g, "...")                                       // ellipsis
+    .replace(/[•●▪◦‣⁃·∙]/g, "-") // bullets / middots
+    .replace(/[   ]/g, " ")                           // non-breaking / figure spaces
+    .replace(/[​‌‍﻿­]/g, "");               // zero-width / soft hyphen
+}
+// Heuristic: which configured concepts don't appear to be covered by the source doc (per #10).
+function missingConcepts(concepts, doc) {
+  if (!concepts || !concepts.length) return [];
+  if (!doc || !doc.trim()) return concepts.slice();
+  const low = doc.toLowerCase();
+  const stop = new Set(["the", "and", "of", "a", "to", "in", "is", "on", "for", "with", "that", "this", "it", "as", "or", "an", "by", "be", "are", "you", "your"]);
+  const missing = [];
+  for (const c of concepts) {
+    const cl = c.toLowerCase();
+    if (low.includes(cl)) continue; // exact phrase present
+    const words = cl.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !stop.has(w));
+    if (!words.length) { missing.push(c); continue; }
+    const hits = words.filter(w => low.includes(w)).length;
+    if (hits / words.length < 0.5) missing.push(c);
+  }
+  return missing;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -86,6 +118,8 @@ app.post("/api/assignments", requireInstructor, uploadPdf.single("pdf"), async (
       numPages = out.numPages;
     }
 
+    readingText = normalizeSourceDoc(readingText); // #10: ASCII-safe the source text
+
     const concepts = [];
     for (let i = 1; i <= 6; i++) {
       const v = b["concept" + i];
@@ -116,7 +150,9 @@ app.post("/api/assignments", requireInstructor, uploadPdf.single("pdf"), async (
       createdAt: store.getAssignment(b.id)?.createdAt || Date.now()
     };
     store.saveAssignment(assignment);
-    res.json(assignment);
+    // #10: warn (don't block) if a configured concept doesn't appear to be covered by the source doc
+    const conceptWarnings = (assignment.tuning === "concepts") ? missingConcepts(assignment.concepts, assignment.readingText) : [];
+    res.json({ ...assignment, conceptWarnings });
   } catch (e) {
     console.error("assignment save failed:", e);
     res.status(500).json({ error: "Could not read that PDF. Try the Text option, or a different PDF." });
@@ -320,6 +356,7 @@ function buildStructured(s, assignment) {
       answer: ans ? {
         status: "answered",
         text: ans.text,
+        transcriptSource: ans.edited ? "student_edited" : "raw_asr", // raw speech-to-text vs. the student hand-editing it
         rawAsrTranscript: ans.spoken || null,
         transcriptEditedByStudent: !!ans.edited,
         startedSpeakingAtUTC: iso(ans.firstWordAt),
