@@ -104,6 +104,7 @@ app.post("/api/assignments", requireInstructor, uploadPdf.single("pdf"), async (
       tuning: b.tuning || "ai",        // 'concepts' | 'ai'
       concepts: (b.tuning === "concepts") ? concepts : [],
       requireCamera: b.requireCamera !== "false",
+      coachMode: b.coachMode === "coaching" ? "coaching" : "assessment", // default: assess (don't supply answers)
       avOptional: b.avOptional === "1", // accommodation: don't hard-block start if AV unavailable
       showReading: b.showReading === "true", // default false — source doc is the AI's private key
       feedbackMode: b.feedbackMode || "approve", // 'approve' | 'immediate'
@@ -268,6 +269,7 @@ app.post("/api/submit", (req, res) => {
     // record which version of the source document the coach was working from (per #10)
     submission.sourceDocHash = assignment.readingText
       ? crypto.createHash("sha256").update(assignment.readingText).digest("hex").slice(0, 12) : null;
+    submission.coachMode = assignment.coachMode || "assessment";
     submission.submittedAt = Date.now();
     submission.status = "complete";
 
@@ -363,6 +365,7 @@ function buildStructured(s, assignment) {
       startedAtUTC: iso(s.startedAt), endedAtUTC: iso(s.endedAt), submittedAtUTC: iso(s.submittedAt),
       durationSec: (s.startedAt && s.endedAt) ? Math.round((s.endedAt - s.startedAt) / 1000) : null,
       status: s.status, avStatus: s.avStatus || null, recordingGaps: s.recordingGaps || [],
+      coachMode: s.coachMode || (assignment && assignment.coachMode) || "assessment",
       sourceDocHash: s.sourceDocHash || null,
       configuredConcepts: (assignment && assignment.concepts) || []
     },

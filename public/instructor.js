@@ -128,6 +128,7 @@ $("#save-btn").addEventListener("click", async () => {
   fd.append("minWords", $("#f-minwords").value);
   fd.append("requireCamera", $("#f-camera").value);
   fd.append("avOptional", $("#f-avoptional").value);
+  fd.append("coachMode", $("#f-coachmode").value);
   fd.append("feedbackMode", $("#f-feedback").value);
   fd.append("showReading", $("#f-showreading").value);
   fd.append("waitingTime", $("#f-waiting").value);
@@ -188,6 +189,7 @@ async function editAssignment(id) {
   $("#f-maxq").value = a.maxQuestions; $("#f-minwords").value = a.minWords;
   $("#f-camera").value = String(a.requireCamera); $("#f-feedback").value = a.feedbackMode;
   $("#f-avoptional").value = a.avOptional ? "1" : "";
+  $("#f-coachmode").value = a.coachMode || "assessment";
   $("#f-showreading").value = String(!!a.showReading);
   $("#f-waiting").value = String(a.waitingTime || 0);
   $("#f-answerlimit").value = String(a.answerLimit || 0);
@@ -335,7 +337,7 @@ async function openSub(id) {
       <button class="btn danger" id="del-sub" style="font-size:13px">Delete submission + video</button></div>
     <p class="meta">${esc(s.assignmentTitle)}</p>
     <p class="meta">${s.studentEmail ? "✉ " + esc(s.studentEmail) + " · " : ""}${s.studentId ? "ID " + esc(s.studentId) : ""}</p>
-    <p class="meta">🕒 Started ${startStr}${dur} · submitted ${fmtTZ(s.submittedAt)}</p>
+    <p class="meta">🕒 Started ${startStr}${dur} · submitted ${fmtTZ(s.submittedAt)}${s.coachMode ? ` · 🎯 ${s.coachMode === "coaching" ? "coaching mode (coach could correct/teach)" : "assessment mode (coach didn't reveal answers)"}` : ""}</p>
     ${s.status === "in-progress" ? `<div class="banner warn">⏳ <strong>Not submitted.</strong> This attempt was autosaved but never completed — the student likely closed the tab or their device crashed mid-conversation. The partial transcript is below; there's no video or AI feedback for it. They may have a separate completed attempt.</div>` : ""}
     ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>tried to paste text</strong> into the answer box (pasting is blocked, but the attempt and the text are logged below). Compare the transcript against the video.</div>` : ""}
     ${s.flaggedTimeOver ? `<div class="banner warn">⏱ This student <strong>went over the per-answer time limit</strong> on at least one question. A signal to look closer at pacing — not an automatic penalty.</div>` : ""}

@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>COM 303 · Instructor</title>
-<link rel="stylesheet" href="app.css?v=18"/>
+<link rel="stylesheet" href="app.css?v=19"/>
 </head>
 <body>
 <header class="top">
@@ -116,6 +116,13 @@
           </select>
         </div>
         <div>
+          <label>Coach mode</label>
+          <select id="f-coachmode">
+            <option value="assessment">Assessment — measure only (don't reveal answers)</option>
+            <option value="coaching">Coaching — correct &amp; teach during the conversation</option>
+          </select>
+        </div>
+        <div>
           <label>AI feedback to students</label>
           <select id="f-feedback">
             <option value="approve">I approve it before students see it</option>
@@ -201,6 +208,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="instructor.js?v=18"></script>
+<script src="instructor.js?v=19"></script>
 </body>
 </html>
