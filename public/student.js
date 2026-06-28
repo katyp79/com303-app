@@ -104,7 +104,7 @@ function checkActivity() {
   } else if (active && awayStart !== null) {
     const dur = Date.now() - awayStart;
     if (sessionActive && dur > 1500 && awayEvents.length < 100) {
-      awayEvents.push({ videoOffsetMs: awayStart - (recordingStartedAt || awayStart), durationMs: dur, q: questionNum() });
+      awayEvents.push({ at: awayStart, videoOffsetMs: awayStart - (recordingStartedAt || awayStart), durationMs: dur, q: questionNum() });
     }
     awayStart = null;
   }
@@ -115,7 +115,7 @@ window.addEventListener("focus", checkActivity);
 document.addEventListener("copy", () => {
   if (!sessionActive || copyEvents.length >= 100) return;
   const sel = (document.getSelection && document.getSelection().toString()) || "";
-  copyEvents.push({ text: sel.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
+  copyEvents.push({ at: Date.now(), text: sel.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
 });
 
 // Warn before closing the tab mid-conversation (browsers show a generic confirm dialog).
@@ -342,7 +342,7 @@ $("#answer").addEventListener("paste", (e) => {
   e.preventDefault(); // pasting is disabled — this is a spoken answer. Still logged for the instructor.
   pasteUsed = true;
   const t = (e.clipboardData && e.clipboardData.getData("text")) || "";
-  if (pasteEvents.length < 100) pasteEvents.push({ text: t.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
+  if (pasteEvents.length < 100) pasteEvents.push({ at: Date.now(), text: t.slice(0, 1000), videoOffsetMs: videoOffsetMs(), q: questionNum() });
   $("#mic-status").textContent = "⚠ Pasting is disabled — please speak your answer.";
   toast("Pasting isn't allowed here — please speak your answer.");
 });

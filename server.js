@@ -3,6 +3,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const archiver = require("archiver");
 const store = require("./lib/store");
@@ -264,6 +265,9 @@ app.post("/api/submit", (req, res) => {
     const hasRec = !!(submission.videoFile || submission.audioFile);
     const partialAV = hasRec && (submission.recordingGaps.length > 0 || !!req.body.recordingStoppedEarly || !!submission.videoError);
     submission.avStatus = !hasRec ? "missing" : (partialAV ? "partial" : "ok");
+    // record which version of the source document the coach was working from (per #10)
+    submission.sourceDocHash = assignment.readingText
+      ? crypto.createHash("sha256").update(assignment.readingText).digest("hex").slice(0, 12) : null;
     submission.submittedAt = Date.now();
     submission.status = "complete";
 
@@ -289,6 +293,100 @@ app.post("/api/submit", (req, res) => {
     res.status(500).json({ error: "Could not save your submission." });
   }
   });
+});
+
+// ---------- structured (JSON) export — a stable, machine-readable schema for scripting/forensics ----------
+function buildStructured(s, assignment) {
+  const iso = ms => (ms ? new Date(ms).toISOString() : null);
+  const hist = Array.isArray(s.history) ? s.history : [];
+  // pair each Coach turn (a question) with the student turn that follows it
+  const questions = [];
+  for (let i = 0; i < hist.length; i++) {
+    if (hist[i].role !== "tutor") continue;
+    const prompt = hist[i];
+    const ans = (hist[i + 1] && hist[i + 1].role === "student") ? hist[i + 1] : null;
+    let pauseSec = null, speakSec = null;
+    if (ans && prompt.at && ans.at && ans.firstWordAt && ans.firstWordAt >= prompt.at && ans.firstWordAt <= ans.at) {
+      pauseSec = Math.round((ans.firstWordAt - prompt.at) / 1000);
+      speakSec = Math.round((ans.at - ans.firstWordAt) / 1000);
+    }
+    questions.push({
+      index: questions.length + 1,
+      prompt: prompt.text,
+      promptAtUTC: iso(prompt.at),
+      promptVideoOffsetMs: prompt.videoOffsetMs == null ? null : prompt.videoOffsetMs,
+      answer: ans ? {
+        status: "answered",
+        text: ans.text,
+        rawAsrTranscript: ans.spoken || null,
+        transcriptEditedByStudent: !!ans.edited,
+        startedSpeakingAtUTC: iso(ans.firstWordAt),
+        submittedAtUTC: iso(ans.at),
+        pauseBeforeSpeakingSec: pauseSec,
+        speakingSec: speakSec,
+        videoOffsetMs: ans.videoOffsetMs == null ? null : ans.videoOffsetMs
+      } : { status: "not_answered", note: "Coach asked this but no student answer was recorded (session ended or was cut off)." }
+    });
+  }
+  // typed event log with absolute UTC timestamps
+  const events = [];
+  for (const e of (s.awayEvents || [])) events.push({ type: "page_leave", atUTC: iso(e.at), endAtUTC: iso(e.at && e.durationMs ? e.at + e.durationMs : null), durationSec: e.durationMs ? Math.round(e.durationMs / 1000) : null, videoOffsetMs: e.videoOffsetMs == null ? null : e.videoOffsetMs, question: e.q == null ? null : e.q });
+  for (const e of (s.copyEvents || [])) events.push({ type: "copy", atUTC: iso(e.at), text: e.text || "", videoOffsetMs: e.videoOffsetMs == null ? null : e.videoOffsetMs, question: e.q == null ? null : e.q });
+  for (const e of (s.pasteEvents || [])) events.push({ type: "paste_attempt", atUTC: iso(e.at), text: e.text || "", videoOffsetMs: e.videoOffsetMs == null ? null : e.videoOffsetMs, question: e.q == null ? null : e.q });
+  for (const g of (s.recordingGaps || [])) events.push({ type: "capture_gap", reason: g.reason || "", startVideoOffsetMs: g.startOffsetMs == null ? null : g.startOffsetMs, endVideoOffsetMs: g.endOffsetMs == null ? null : g.endOffsetMs });
+  events.sort((a, b) => (a.atUTC || "").localeCompare(b.atUTC || ""));
+  // derived behavioral summary (so the instructor doesn't recompute these by hand)
+  const away = s.awayEvents || [];
+  const offPageByQuestion = {};
+  let totalOff = 0, longest = 0;
+  for (const e of away) { const sec = e.durationMs ? e.durationMs / 1000 : 0; totalOff += sec; if (sec > longest) longest = sec; const q = e.q || 0; offPageByQuestion[q] = (offPageByQuestion[q] || 0) + sec; }
+  let maxPause = 0;
+  for (const q of questions) if (q.answer && q.answer.pauseBeforeSpeakingSec > maxPause) maxPause = q.answer.pauseBeforeSpeakingSec;
+  const behavioralSummary = {
+    totalOffPageSec: Math.round(totalOff),
+    offPageByQuestionSec: Object.fromEntries(Object.entries(offPageByQuestion).map(([k, v]) => [k, Math.round(v)])),
+    longestLeaveSec: Math.round(longest),
+    tabAways: away.length,
+    copies: (s.copyEvents || []).length,
+    pasteAttempts: (s.pasteEvents || []).length,
+    longestPauseBeforeSpeakingSec: maxPause,
+    wentOverTimeLimit: !!s.flaggedTimeOver,
+    questionsAsked: questions.length,
+    questionsAnswered: questions.filter(q => q.answer && q.answer.status === "answered").length
+  };
+  return {
+    schemaVersion: 1,
+    session: {
+      submissionId: s.id, sessionId: s.sessionId || null,
+      assignmentId: s.assignmentId, assignmentTitle: s.assignmentTitle,
+      student: { name: s.studentName, email: s.studentEmail || "", id: s.studentId || "" },
+      startedAtUTC: iso(s.startedAt), endedAtUTC: iso(s.endedAt), submittedAtUTC: iso(s.submittedAt),
+      durationSec: (s.startedAt && s.endedAt) ? Math.round((s.endedAt - s.startedAt) / 1000) : null,
+      status: s.status, avStatus: s.avStatus || null, recordingGaps: s.recordingGaps || [],
+      sourceDocHash: s.sourceDocHash || null,
+      configuredConcepts: (assignment && assignment.concepts) || []
+    },
+    questions, events, behavioralSummary,
+    grading: { aiSuggestedScore: s.suggestedScore == null ? null : s.suggestedScore, scoreRationale: s.scoreRationale || "", instructorGrade: s.grade == null ? null : s.grade, aiFeedback: s.feedback || null }
+  };
+}
+const safeFile = str => String(str || "export").replace(/[^a-z0-9]+/gi, "_").slice(0, 60);
+app.get("/api/submissions/:id/export.json", requireInstructor, (req, res) => {
+  const s = store.getSubmission(req.params.id);
+  if (!s) return res.status(404).json({ error: "Submission not found" });
+  const obj = buildStructured(s, store.getAssignment(s.assignmentId));
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename=${safeFile(s.studentName)}_${safeFile(s.assignmentTitle)}.json`);
+  res.send(JSON.stringify(obj, null, 2));
+});
+app.get("/api/submissions.json", requireInstructor, (req, res) => {
+  const sel = req.query.assignmentId;
+  let subs = store.getSubmissions();
+  if (sel) subs = subs.filter(s => s.assignmentId === sel);
+  const out = subs.map(s => buildStructured(s, store.getAssignment(s.assignmentId)));
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename=com303-submissions.json`);
+  res.send(JSON.stringify({ schemaVersion: 1, exportedAtUTC: new Date().toISOString(), count: out.length, submissions: out }, null, 2));
 });
 
 // ---------- instructor dashboard ----------

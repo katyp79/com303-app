@@ -204,6 +204,11 @@ $("#export-csv").addEventListener("click", () => {
   const url = "/api/submissions.csv?key=" + encodeURIComponent(KEY) + (sel ? "&assignmentId=" + encodeURIComponent(sel) : "");
   window.location = url;
 });
+$("#export-json").addEventListener("click", () => {
+  if (!allSubs.length) return toast("No submissions to export");
+  const sel = $("#sub-filter").value;
+  window.location = "/api/submissions.json?key=" + encodeURIComponent(KEY) + (sel ? "&assignmentId=" + encodeURIComponent(sel) : "");
+});
 $("#download-videos").addEventListener("click", () => {
   const sel = $("#sub-filter").value;
   window.location = "/api/videos.zip?key=" + encodeURIComponent(KEY) + (sel ? "&assignmentId=" + encodeURIComponent(sel) : "");
@@ -326,6 +331,7 @@ async function openSub(id) {
     : "";
 
   d.innerHTML = `<div class="row"><h2 style="margin:0">${esc(s.studentName)}</h2><span class="spacer"></span>
+      <a class="btn subtle" style="font-size:13px" href="/api/submissions/${s.id}/export.json?key=${encodeURIComponent(KEY)}">⤓ JSON</a>
       <button class="btn danger" id="del-sub" style="font-size:13px">Delete submission + video</button></div>
     <p class="meta">${esc(s.assignmentTitle)}</p>
     <p class="meta">${s.studentEmail ? "✉ " + esc(s.studentEmail) + " · " : ""}${s.studentId ? "ID " + esc(s.studentId) : ""}</p>
