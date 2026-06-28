@@ -127,6 +127,7 @@ $("#save-btn").addEventListener("click", async () => {
   fd.append("maxQuestions", $("#f-maxq").value);
   fd.append("minWords", $("#f-minwords").value);
   fd.append("requireCamera", $("#f-camera").value);
+  fd.append("avOptional", $("#f-avoptional").value);
   fd.append("feedbackMode", $("#f-feedback").value);
   fd.append("showReading", $("#f-showreading").value);
   fd.append("waitingTime", $("#f-waiting").value);
@@ -186,6 +187,7 @@ async function editAssignment(id) {
   for (let i = 0; i < 6; i++) $("#f-c" + (i + 1)).value = a.concepts[i] || "";
   $("#f-maxq").value = a.maxQuestions; $("#f-minwords").value = a.minWords;
   $("#f-camera").value = String(a.requireCamera); $("#f-feedback").value = a.feedbackMode;
+  $("#f-avoptional").value = a.avOptional ? "1" : "";
   $("#f-showreading").value = String(!!a.showReading);
   $("#f-waiting").value = String(a.waitingTime || 0);
   $("#f-answerlimit").value = String(a.answerLimit || 0);
@@ -230,7 +232,7 @@ function renderSubs() {
   box.innerHTML = "";
   rows.forEach(s => {
     const el = document.createElement("div"); el.className = "list-item";
-    const fb = (s.status === "in-progress" ? `<span class="pill warn">⏳ incomplete</span> ` : "") + (s.grade != null && s.grade !== "" ? `<span class="pill good">grade: ${esc(s.grade)}</span> ` : (s.suggestedScore != null ? `<span class="pill muted">suggested: ${s.suggestedScore}</span> ` : "")) + (s.flaggedPaste ? `<span class="pill warn">⚠ pasted</span> ` : "") + (s.flaggedEdited ? `<span class="pill warn">✎ edited</span> ` : "") + (s.tabAway ? `<span class="pill warn">👁 away ${s.tabAway}×</span> ` : "") + (s.copies ? `<span class="pill warn">⎘ copied ${s.copies}×</span> ` : "") + (s.feedbackApproved ? `<span class="pill good">shared</span>` : "");
+    const fb = (s.status === "in-progress" ? `<span class="pill warn">⏳ incomplete</span> ` : "") + (s.grade != null && s.grade !== "" ? `<span class="pill good">grade: ${esc(s.grade)}</span> ` : (s.suggestedScore != null ? `<span class="pill muted">suggested: ${s.suggestedScore}</span> ` : "")) + (s.avStatus === "missing" ? `<span class="pill warn">🎥 no AV</span> ` : (s.avStatus === "partial" ? `<span class="pill warn">🎥 partial AV</span> ` : "")) + (s.flaggedPaste ? `<span class="pill warn">⚠ pasted</span> ` : "") + (s.flaggedEdited ? `<span class="pill warn">✎ edited</span> ` : "") + (s.tabAway ? `<span class="pill warn">👁 away ${s.tabAway}×</span> ` : "") + (s.copies ? `<span class="pill warn">⎘ copied ${s.copies}×</span> ` : "") + (s.feedbackApproved ? `<span class="pill good">shared</span>` : "");
     el.innerHTML = `<div style="flex:1"><div style="font-weight:650">${esc(s.studentName)} ${s.studentId ? `<span class="meta">(${esc(s.studentId)})</span>` : ""}</div>
       <div class="meta">${s.studentEmail ? esc(s.studentEmail) + " · " : ""}${esc(s.assignmentTitle)} · ${fmt(s.submittedAt)} · ${s.hasVideo ? "🎥 video" : (s.videoPurgedAt ? "video offloaded" : "no video")}</div></div> ${fb}`;
     const open = document.createElement("button"); open.className = "btn subtle"; open.textContent = "Open"; open.style.fontSize = "13px";
@@ -311,6 +313,17 @@ async function openSub(id) {
         ${copyDetail ? `<div><strong>⎘ Copied text:</strong></div><ul style="margin:4px 0 8px 18px">${copyDetail}</ul>` : ""}
         ${pasteDetail ? `<div><strong>📋 Pasted in:</strong></div><ul style="margin:4px 0 0 18px">${pasteDetail}</ul>` : ""}
       </div>` : "";
+  // AV status: missing / partial recording, with the gap timestamps (clickable where video exists)
+  const gapList = (s.recordingGaps || []).map(g => {
+    const span = (g.endOffsetMs != null) ? `${mmss(g.startOffsetMs)}–${mmss(g.endOffsetMs)}` : `from ${mmss(g.startOffsetMs)} to the end`;
+    const j = (s.hasVideo && g.startOffsetMs != null) ? ` <a href="#" class="vjump" data-off="${Math.round(g.startOffsetMs / 1000)}">▶</a>` : "";
+    return `<li>${esc(g.reason || "capture dropped")} (${span})${j}</li>`;
+  }).join("");
+  const avBanner = s.avStatus === "missing"
+    ? `<div class="banner warn">🎥 <strong>No recording was saved</strong> for this session — there is no video/audio to verify the answers against. Grade on the transcript + behavioral signals, or pull this student into a short live follow-up.</div>`
+    : s.avStatus === "partial"
+    ? `<div class="banner warn">🎥 <strong>Recording is partial</strong> — capture dropped during the session${gapList ? `:<ul style="margin:4px 0 0 18px">${gapList}</ul>` : "."} The covered stretches are still reliable.</div>`
+    : "";
 
   d.innerHTML = `<div class="row"><h2 style="margin:0">${esc(s.studentName)}</h2><span class="spacer"></span>
       <button class="btn danger" id="del-sub" style="font-size:13px">Delete submission + video</button></div>
@@ -321,6 +334,7 @@ async function openSub(id) {
     ${s.flaggedPaste ? `<div class="banner warn">⚠ This student <strong>tried to paste text</strong> into the answer box (pasting is blocked, but the attempt and the text are logged below). Compare the transcript against the video.</div>` : ""}
     ${s.flaggedTimeOver ? `<div class="banner warn">⏱ This student <strong>went over the per-answer time limit</strong> on at least one question. A signal to look closer at pacing — not an automatic penalty.</div>` : ""}
     ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>edited the transcription</strong> of one or more spoken answers. The edited answers below show the original and exactly what changed.</div>` : ""}
+    ${avBanner}
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${integrityDetail}
     ${navBar}

@@ -103,6 +103,7 @@ app.post("/api/assignments", requireInstructor, uploadPdf.single("pdf"), async (
       tuning: b.tuning || "ai",        // 'concepts' | 'ai'
       concepts: (b.tuning === "concepts") ? concepts : [],
       requireCamera: b.requireCamera !== "false",
+      avOptional: b.avOptional === "1", // accommodation: don't hard-block start if AV unavailable
       showReading: b.showReading === "true", // default false — source doc is the AI's private key
       feedbackMode: b.feedbackMode || "approve", // 'approve' | 'immediate'
       waitingTime: parseInt(b.waitingTime || "0", 10),
@@ -141,7 +142,8 @@ app.get("/api/assignments/:id/run", (req, res) => {
     showReading: !!a.showReading,
     requireCamera: a.requireCamera, waitingTime: a.waitingTime, minWords: a.minWords,
     answerLimit: a.answerLimit || 0,
-    answerWindow: a.answerWindow || 0
+    answerWindow: a.answerWindow || 0,
+    avOptional: !!a.avOptional
   });
 });
 
@@ -195,7 +197,7 @@ app.post("/api/progress", (req, res) => {
         studentId: (student && student.id) || "",
         history: [], videoFile: null, videoError: null,
         startedAt: startedAt || Date.now(), endedAt: null,
-        flaggedPaste: false, flaggedTimeOver: false, flaggedEdited: false, submittedAt: Date.now(),
+        flaggedPaste: false, flaggedTimeOver: false, flaggedEdited: false, avStatus: null, recordingGaps: [], submittedAt: Date.now(),
         feedback: null, suggestedScore: null, scoreRationale: "", grade: null,
         feedbackApproved: false, status: "in-progress"
       };
@@ -257,6 +259,11 @@ app.post("/api/submit", (req, res) => {
     submission.pasteEvents = parseArr(req.body.pasteEvents);
     submission.tabAway = submission.awayEvents.length;
     submission.copies = submission.copyEvents.length;
+    // AV status: missing (no recording), partial (gaps / stopped early / upload error), or ok
+    submission.recordingGaps = parseArr(req.body.recordingGaps);
+    const hasRec = !!(submission.videoFile || submission.audioFile);
+    const partialAV = hasRec && (submission.recordingGaps.length > 0 || !!req.body.recordingStoppedEarly || !!submission.videoError);
+    submission.avStatus = !hasRec ? "missing" : (partialAV ? "partial" : "ok");
     submission.submittedAt = Date.now();
     submission.status = "complete";
 
@@ -272,7 +279,11 @@ app.post("/api/submit", (req, res) => {
     }
 
     store.saveSubmission(submission);
-    res.json({ ok: true, submissionId: submission.id, feedbackShared: submission.feedbackApproved, feedback: submission.feedbackApproved ? submission.feedback : null });
+    res.json({
+      ok: true, submissionId: submission.id,
+      videoBytes: vF ? vF.size : 0, audioBytes: aF ? aF.size : 0, avStatus: submission.avStatus,
+      feedbackShared: submission.feedbackApproved, feedback: submission.feedbackApproved ? submission.feedback : null
+    });
   } catch (e) {
     console.error("submit error:", e);
     res.status(500).json({ error: "Could not save your submission." });
@@ -301,13 +312,14 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return `"${s.replace(/"/g, '""')}"`;
   };
-  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "FlaggedTimeOver", "EditedTranscript", "TabSwitches", "Copies", "CopiedText", "PastedText", "FeedbackShared", "Transcript", "Feedback"];
+  const head = ["Student", "Email", "StudentID", "Assignment", "Status", "AVStatus", "Started", "DurationSec", "Submitted", "Grade", "AISuggestedScore", "FlaggedPaste", "FlaggedTimeOver", "EditedTranscript", "TabSwitches", "Copies", "CopiedText", "PastedText", "FeedbackShared", "Transcript", "Feedback"];
   const lines = subs.map(s => {
     const dur = (s.startedAt && s.endedAt) ? Math.round((s.endedAt - s.startedAt) / 1000) : "";
     const transcript = (s.history || []).map(h => `${h.role === "tutor" ? "Coach" : s.studentName}: ${h.text}`).join("\n");
     return [
       s.studentName, s.studentEmail, s.studentId, s.assignmentTitle,
       s.status === "in-progress" ? "INCOMPLETE" : "complete",
+      s.avStatus || "",
       s.startedAt ? new Date(s.startedAt).toLocaleString() : "",
       dur, new Date(s.submittedAt).toLocaleString(),
       s.grade == null ? "" : s.grade, s.suggestedScore == null ? "" : s.suggestedScore,

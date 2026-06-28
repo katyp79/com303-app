@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>COM 303 · Instructor</title>
-<link rel="stylesheet" href="app.css?v=16"/>
+<link rel="stylesheet" href="app.css?v=17"/>
 </head>
 <body>
 <header class="top">
@@ -109,6 +109,13 @@
           <select id="f-camera"><option value="true">Required — record video</option><option value="false">Off — audio/transcript only</option></select>
         </div>
         <div>
+          <label>Recording requirement</label>
+          <select id="f-avoptional">
+            <option value="">Required — must have working camera/mic to start</option>
+            <option value="1">Accommodation — allow starting without a recording</option>
+          </select>
+        </div>
+        <div>
           <label>AI feedback to students</label>
           <select id="f-feedback">
             <option value="approve">I approve it before students see it</option>
@@ -193,6 +200,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="instructor.js?v=16"></script>
+<script src="instructor.js?v=17"></script>
 </body>
 </html>

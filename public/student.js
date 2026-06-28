@@ -13,6 +13,70 @@ let student = { name: "", id: "" };
 let mediaStream = null, mediaRecorder = null, videoChunks = [];
 let audioRecorder = null, audioChunks = []; // separate audio-only backup, in case the video recording fails
 let recordingStartedAt = null, sessionStartedAt = null;
+// ---- AV reliability: detect/log capture gaps so the instructor knows if a recording is partial ----
+const AUDIO_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+let recordingGaps = [];          // [{startOffsetMs, endOffsetMs|null, reason}] — stretches where capture dropped
+let recordingEverStarted = false;
+let recordingStoppedEarly = false;
+let finishing = false, restarting = false;
+function closeOpenGaps(prefix) {
+  for (const g of recordingGaps) if (g.endOffsetMs == null && (!prefix || g.reason.startsWith(prefix))) g.endOffsetMs = videoOffsetMs();
+}
+function watchTrack(track) {
+  const kind = track.kind; // "video" | "audio"
+  track.addEventListener("mute", () => {
+    if (!sessionActive || finishing || recordingGaps.length >= 200) return;
+    recordingGaps.push({ startOffsetMs: videoOffsetMs(), endOffsetMs: null, reason: kind + " muted" });
+  });
+  track.addEventListener("unmute", () => { closeOpenGaps(kind + " muted"); });
+  track.addEventListener("ended", () => {
+    if (!sessionActive || finishing) return;
+    recordingStoppedEarly = true;
+    closeOpenGaps(kind);
+    if (recordingGaps.length < 200) recordingGaps.push({ startOffsetMs: videoOffsetMs(), endOffsetMs: null, reason: kind + " ended (device lost)" });
+    tryRestartRecording();
+  });
+}
+function startRecorders(stream) {
+  const wantVideo = assignment && assignment.requireCamera !== false;
+  try {
+    const recOpts = pickMime();
+    recOpts.videoBitsPerSecond = 1000000; // ~1 Mbps
+    recOpts.audioBitsPerSecond = 64000;
+    mediaRecorder = new MediaRecorder(stream, recOpts);
+    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) videoChunks.push(e.data); };
+    mediaRecorder.onerror = () => { if (sessionActive && !finishing) { recordingStoppedEarly = true; tryRestartRecording(); } };
+    mediaRecorder.start(1000);
+    if (!recordingStartedAt) recordingStartedAt = Date.now();
+    recordingEverStarted = true;
+    $("#recdot").style.display = "inline-block";
+    $("#cam-status").textContent = wantVideo ? "Recording video" : "Recording audio";
+  } catch (e) { $("#cam-status").textContent = "Recording unavailable"; }
+  // separate audio-only backup — survives even if the video recording fails (common on Safari)
+  try {
+    const audioStream = new MediaStream(stream.getAudioTracks());
+    const aMime = pickAudioMime();
+    audioRecorder = new MediaRecorder(audioStream, aMime ? { mimeType: aMime, audioBitsPerSecond: 64000 } : {});
+    audioRecorder.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
+    if (!recordingStartedAt) recordingStartedAt = Date.now();
+    audioRecorder.start(1000);
+  } catch (e) { /* no audio backup available on this browser */ }
+}
+async function tryRestartRecording() {
+  if (!sessionActive || finishing || restarting) return;
+  restarting = true;
+  try {
+    const wantVideo = assignment && assignment.requireCamera !== false;
+    const fresh = await navigator.mediaDevices.getUserMedia(wantVideo ? { video: true, audio: AUDIO_CONSTRAINTS } : { audio: AUDIO_CONSTRAINTS });
+    try { if (mediaStream) mediaStream.getTracks().forEach(t => t.stop()); } catch {}
+    mediaStream = fresh;
+    const cam = $("#cam"); if (cam) cam.srcObject = fresh;
+    fresh.getTracks().forEach(watchTrack);
+    startRecorders(fresh); // new segment appended to the same chunk arrays
+    closeOpenGaps(); // capture resumed
+  } catch (e) { /* couldn't reacquire — the open gap stays open → marked partial */ }
+  restarting = false;
+}
 let sessionSeed = Math.floor(Math.random() * 1e9) + 1; // randomizes question order/angle per student
 let sessionId = null; // unique id for this attempt, used to autosave progress server-side
 let heartbeatTimer = null; // pings the server periodically so the instructor can see live sessions
@@ -113,29 +177,33 @@ $("#begin-btn").addEventListener("click", async () => {
 
   if (!$("#agree-rules") || !$("#agree-rules").checked) return toast("Please read the ground rules and check the box to begin.");
 
-  // AV is non-optional: a reliable recording is what lets your instructor resolve any question later.
-  const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  // AV is the highest-value signal for resolving an ambiguous session, so it's required by default.
+  // The instructor can mark an assignment "AV optional" (accommodation), which relaxes the hard block.
   const wantVideo = assignment.requireCamera !== false; // record video unless the instructor turned camera off
+  const avRequired = !assignment.avOptional;
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia(
-      wantVideo ? { video: true, audio: audioConstraints } : { audio: audioConstraints }
+      wantVideo ? { video: true, audio: AUDIO_CONSTRAINTS } : { audio: AUDIO_CONSTRAINTS }
     );
   } catch {
-    return toast(wantVideo
+    if (avRequired) return toast(wantVideo
       ? "This assignment is recorded. Please ALLOW camera and microphone when your browser asks, then click Begin again."
       : "This assignment is recorded. Please ALLOW microphone access when your browser asks, then click Begin again.");
+    mediaStream = null; // accommodation: proceed with no recording
   }
-  if (!mediaStream || !mediaStream.getAudioTracks().length) {
-    return toast("No microphone was detected. Please connect or enable a mic, then click Begin again.");
-  }
-  if (wantVideo && !mediaStream.getVideoTracks().length) {
-    return toast("No camera was detected. Please enable your camera, then click Begin again.");
-  }
-  if (!window.MediaRecorder) {
-    return toast("This browser can't record. Please use Chrome or Edge on a computer.");
+  if (avRequired) {
+    if (!mediaStream || !mediaStream.getAudioTracks().length) {
+      return toast("No microphone was detected. Please connect or enable a mic, then click Begin again.");
+    }
+    if (wantVideo && !mediaStream.getVideoTracks().length) {
+      return toast("No camera was detected. Please enable your camera, then click Begin again.");
+    }
+    if (!window.MediaRecorder) {
+      return toast("This browser can't record. Please use Chrome or Edge on a computer.");
+    }
   }
 
-  $("#cam").srcObject = mediaStream;
+  if (mediaStream) $("#cam").srcObject = mediaStream;
   $("#intro").style.display = "none";
   $("#session").style.display = "block";
   sessionStartedAt = Date.now();
@@ -144,29 +212,20 @@ $("#begin-btn").addEventListener("click", async () => {
   saveProgress(); // register this attempt immediately so it shows as "active now"
   heartbeatTimer = setInterval(saveProgress, 30000); // keep the "active now" status fresh
 
-  // record the whole session
-  if (mediaStream) {
-    try {
-      const recOpts = pickMime();
-      recOpts.videoBitsPerSecond = 1000000; // ~1 Mbps: a 5-min session ≈ 35 MB (was ~18 MB/min)
-      recOpts.audioBitsPerSecond = 64000;
-      mediaRecorder = new MediaRecorder(mediaStream, recOpts);
-      mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) videoChunks.push(e.data); };
-      mediaRecorder.start(1000);
-      recordingStartedAt = Date.now();
-      $("#recdot").style.display = "inline-block";
-      $("#cam-status").textContent = wantVideo ? "Recording video" : "Recording audio";
-    } catch (e) { $("#cam-status").textContent = "Recording unavailable"; }
-
-    // Separate audio-only backup — survives even if the video recording fails (common on Safari).
-    try {
-      const audioStream = new MediaStream(mediaStream.getAudioTracks());
-      const aMime = pickAudioMime();
-      audioRecorder = new MediaRecorder(audioStream, aMime ? { mimeType: aMime, audioBitsPerSecond: 64000 } : {});
-      audioRecorder.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
-      if (!recordingStartedAt) recordingStartedAt = Date.now();
-      audioRecorder.start(1000);
-    } catch (e) { /* no audio backup available on this browser */ }
+  // record the whole session, watching for mid-session drops
+  if (mediaStream && window.MediaRecorder) {
+    mediaStream.getTracks().forEach(watchTrack);
+    startRecorders(mediaStream);
+    // pre-flight: confirm the camera is actually producing frames a few seconds in
+    if (wantVideo) setTimeout(() => {
+      const cam = $("#cam");
+      if (sessionActive && !finishing && cam && !cam.videoWidth) {
+        if (recordingGaps.length < 200) recordingGaps.push({ startOffsetMs: 0, endOffsetMs: null, reason: "no camera frames at start" });
+        $("#cam-status").textContent = "⚠ Camera may not be capturing — check nothing else is using it";
+      }
+    }, 3500);
+  } else {
+    $("#cam-status").textContent = "No recording (accommodation)";
   }
 
   coachTurn(); // AI opens
@@ -449,13 +508,16 @@ function speak(text, done) {
 
 // ---------- finish & upload ----------
 async function finish() {
+  finishing = true;
   setMic(false, "Done");
   $("#session").style.display = "none";
   $("#done").style.display = "block";
   $("#upload-status").textContent = "Saving your conversation…";
 
+  closeOpenGaps(); // any capture drop still open ran to the end of the session
   // stop recording and gather both the video and the audio-backup blobs
   const { video, audio } = await stopRecording();
+  const hadVideo = !!(video && video.size), hadAudio = !!(audio && audio.size);
 
   const fd = new FormData();
   fd.append("assignmentId", ASSIGNMENT_ID);
@@ -471,19 +533,33 @@ async function finish() {
   fd.append("awayEvents", JSON.stringify(awayEvents));
   fd.append("copyEvents", JSON.stringify(copyEvents));
   fd.append("pasteEvents", JSON.stringify(pasteEvents));
-  if (video && video.size) fd.append("video", video, "session.webm");
-  if (audio && audio.size) fd.append("audio", audio, "session-audio.webm");
+  fd.append("recordingGaps", JSON.stringify(recordingGaps));
+  fd.append("recordingEverStarted", recordingEverStarted ? "1" : "");
+  fd.append("recordingStoppedEarly", recordingStoppedEarly ? "1" : "");
+  if (hadVideo) fd.append("video", video, "session.webm");
+  if (hadAudio) fd.append("audio", audio, "session-audio.webm");
 
-  try {
-    const r = await fetch("/api/submit", { method: "POST", body: fd });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || "upload failed");
-    const sizeNote = video && video.size ? ` · video ${(video.size / 1048576).toFixed(1)} MB` : (audio && audio.size ? ` · audio ${(audio.size / 1048576).toFixed(1)} MB` : "");
-    $("#upload-status").textContent = "Submitted successfully" + sizeNote;
-    if (d.feedbackShared && d.feedback) {
-      $("#done-feedback").innerHTML = `<h3>Feedback from your instructor's AI coach</h3><div class="reading-box">${esc(d.feedback)}</div>`;
-    }
-  } catch (e) { $("#upload-status").textContent = "Saved your answers, but upload had a problem: " + e.message; }
+  // upload with verification + retry: confirm the recording actually persisted before we call it done
+  let ok = false, lastErr = "";
+  for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+    try {
+      if (attempt > 1) $("#upload-status").textContent = `Saving… (retry ${attempt} of 3)`;
+      const r = await fetch("/api/submit", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "upload failed");
+      // verify what we sent actually stored
+      if ((hadVideo && !(d.videoBytes > 0)) && (hadAudio && !(d.audioBytes > 0))) throw new Error("recording didn't store");
+      ok = true;
+      const avNote = d.avStatus === "missing" ? " · ⚠ no recording saved"
+        : d.avStatus === "partial" ? " · ⚠ recording is partial" : "";
+      const sizeNote = hadVideo ? ` · video ${(video.size / 1048576).toFixed(1)} MB` : (hadAudio ? ` · audio ${(audio.size / 1048576).toFixed(1)} MB` : "");
+      $("#upload-status").textContent = "Submitted successfully" + sizeNote + avNote;
+      if (d.feedbackShared && d.feedback) {
+        $("#done-feedback").innerHTML = `<h3>Feedback from your instructor's AI coach</h3><div class="reading-box">${esc(d.feedback)}</div>`;
+      }
+    } catch (e) { lastErr = e.message; if (attempt < 3) await new Promise(res => setTimeout(res, attempt * 1500)); }
+  }
+  if (!ok) $("#upload-status").textContent = "Saved your answers, but the recording upload had a problem (" + lastErr + "). Your instructor still has the transcript — let them know.";
 
   if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
   sessionActive = false; // submitted — safe to leave the page now
