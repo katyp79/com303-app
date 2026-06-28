@@ -158,7 +158,13 @@ app.post("/api/conversation", async (req, res) => {
       assignment,
       student: student || { name: "the student" },
       history: Array.isArray(history) ? history : [],
-      maxTurns: assignment.maxQuestions || 5,
+      maxTurns: (() => {
+        const cc = (assignment.concepts || []).filter(Boolean).length;
+        const base = assignment.maxQuestions || 5;
+        // Guarantee room to ASK every concept (incl. the last) even if a couple get
+        // re-asked, so the tail concept (e.g. digital inequality) is never truncated.
+        return cc ? Math.max(base, cc + 2) : base;
+      })(),
       seed: seed || 1
     });
     res.json(turn);
