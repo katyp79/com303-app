@@ -61,6 +61,7 @@ window.addEventListener("beforeunload", (e) => {
 const videoOffsetMs = () => (recordingStartedAt ? Date.now() - recordingStartedAt : null);
 let recog = null, listening = false, waitTimer = null;
 let recognizedText = ""; // the raw speech-to-text for the CURRENT answer (the "original")
+let answerFirstWordAt = null, answerFirstWordOffsetMs = null; // when the student first started speaking this answer
 let busy = false;
 let pasteUsed = false; // flags if the student pasted into the answer box (integrity signal)
 let timeOverFlag = false; // flags if the student went past the per-answer time limit on any answer
@@ -228,7 +229,7 @@ async function coachTurn() {
 }
 
 function enableAnswering() {
-  recognizedText = ""; manuallyEdited = false; $("#answer").value = ""; updateWC();
+  recognizedText = ""; manuallyEdited = false; answerFirstWordAt = null; answerFirstWordOffsetMs = null; $("#answer").value = ""; updateWC();
   $("#edit-note").style.color = "var(--muted)";
   $("#edit-note").innerHTML = STATIC_EDIT_NOTE;
   // show the question being answered right above the answer box, so both are on screen
@@ -313,6 +314,7 @@ function startListening(attempt) {
     $("#mic-status").textContent = "🎙 Listening… speak your answer, then click Stop.";
   };
   recog.onresult = ev => {
+    if (answerFirstWordAt == null) { answerFirstWordAt = Date.now(); answerFirstWordOffsetMs = videoOffsetMs(); }
     let interim = "";
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const t = ev.results[i][0].transcript;
@@ -356,7 +358,7 @@ function submitAnswer(forced) {
   const spoken = recognizedText.replace(/\s+/g, " ").trim();
   // only flag as edited if the student ACTUALLY typed/edited AND the result differs from speech
   const edited = manuallyEdited && spoken.length > 0 && spoken !== ans;
-  history.push({ role: "student", text: ans, spoken, edited, at: Date.now(), videoOffsetMs: videoOffsetMs() });
+  history.push({ role: "student", text: ans, spoken, edited, at: Date.now(), videoOffsetMs: videoOffsetMs(), firstWordAt: answerFirstWordAt, firstWordOffsetMs: answerFirstWordOffsetMs });
   addBubble("student", ans);
   saveProgress();
   $("#answer").value = ""; updateWC();

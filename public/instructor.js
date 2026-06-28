@@ -247,17 +247,35 @@ async function openSub(id) {
   const startStr = s.startedAt ? fmtTZ(s.startedAt) : fmtTZ(s.submittedAt);
 
   let maxGapMs = 0;
+  const questions = []; // each Coach turn = a navigable "question" for the jump bar
   const transcript = hist.map((h, i) => {
     const who = h.role === "tutor" ? "Coach" : esc(s.studentName);
+    let lineId = "";
+    if (h.role === "tutor") {
+      const offSec = (s.hasVideo && h.videoOffsetMs != null) ? Math.round(h.videoOffsetMs / 1000) : null;
+      lineId = `tl-${i}`;
+      questions.push({ qn: questions.length + 1, lineId, offSec });
+    }
     const t = h.at ? `<span class="meta"> · ${fmtTZ(h.at)}</span>` : "";
     const jump = (s.hasVideo && h.videoOffsetMs != null)
       ? ` <a href="#" class="vjump" data-off="${Math.round(h.videoOffsetMs / 1000)}">▶ ${mmss(h.videoOffsetMs)}</a>` : "";
     let resp = "";
     if (h.role === "student" && h.at && i > 0 && hist[i - 1].role === "tutor" && hist[i - 1].at) {
-      const gap = h.at - hist[i - 1].at;
-      if (gap > maxGapMs) maxGapMs = gap;
-      const longish = gap > 180000; // > 3 min from question to answer (60s think-time is allowed)
-      resp = ` <span class="meta" style="${longish ? "color:var(--warn);font-weight:700" : ""}">⏱ ${mmss(gap)} to answer</span>`;
+      const prevAt = hist[i - 1].at;
+      if (h.firstWordAt && h.firstWordAt >= prevAt && h.firstWordAt <= h.at) {
+        // split the wait into the SILENT pause before they spoke, and how long they then spoke
+        const pause = h.firstWordAt - prevAt, spoke = h.at - h.firstWordAt;
+        if (pause > maxGapMs) maxGapMs = pause;
+        const longish = pause > 120000; // > 2 min of silence before a word — worth a look
+        const fwJump = (s.hasVideo && h.firstWordOffsetMs != null) ? ` <a href="#" class="vjump" data-off="${Math.round(h.firstWordOffsetMs / 1000)}">▶</a>` : "";
+        resp = ` <span class="meta" style="${longish ? "color:var(--warn);font-weight:700" : ""}">⏱ paused ${mmss(pause)} before speaking${fwJump} · then spoke ${mmss(spoke)}</span>`;
+      } else {
+        // older submissions (no first-word capture): fall back to the single total
+        const gap = h.at - prevAt;
+        if (gap > maxGapMs) maxGapMs = gap;
+        const longish = gap > 180000;
+        resp = ` <span class="meta" style="${longish ? "color:var(--warn);font-weight:700" : ""}">⏱ ${mmss(gap)} to answer</span>`;
+      }
     }
     let edited = "";
     if (h.role === "student" && h.edited && h.spoken) {
@@ -265,8 +283,14 @@ async function openSub(id) {
         + `<span class="pill warn">✎ edited</span> originally transcribed: “${esc(h.spoken)}”`
         + `<div style="margin-top:2px">changes: ${wordDiff(h.spoken, h.text)}</div></div>`;
     }
-    return `<div class="transcript-line"><span class="who">${who}:</span> ${esc(h.text)}${t}${resp}${jump}${edited}</div>`;
+    return `<div class="transcript-line"${lineId ? ` id="${lineId}"` : ""}><span class="who">${who}:</span> ${esc(h.text)}${t}${resp}${jump}${edited}</div>`;
   }).join("");
+  const navBar = questions.length ? `<div class="qnav">
+      <span class="footnote" style="margin-right:2px">Jump to question:</span>
+      <a href="#" class="qchip" id="qprev" title="Previous question">◀</a>
+      ${questions.map(q => `<a href="#" class="qchip" data-line="${q.lineId}"${q.offSec != null ? ` data-off="${q.offSec}"` : ""}>Q${q.qn}</a>`).join("")}
+      <a href="#" class="qchip" id="qnext" title="Next question">▶</a>
+    </div>` : "";
   const longPause = maxGapMs > 180000;
   const watchBits = [
     s.tabAway ? `switched away from the page ${s.tabAway}×` : null,
@@ -297,6 +321,7 @@ async function openSub(id) {
     ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>edited the transcription</strong> of one or more spoken answers. The edited answers below show the original and exactly what changed.</div>` : ""}
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${integrityDetail}
+    ${navBar}
     ${s.hasVideo ? `<video id="sub-video" controls src="/api/video/${s.id}?key=${encodeURIComponent(KEY)}"></video>
       <div class="footnote" style="margin:6px 0 16px">▸ Click a <strong>▶ time</strong> beside any answer to jump the video to that moment. To keep this past your retention window, download it (right-click → Save) to your external drive, then delete the submission.</div>` :
       (s.videoPurgedAt ? `<div class="banner info">Video was offloaded/removed on ${fmtTZ(s.videoPurgedAt)}. Transcript kept below.</div>` : (s.videoError ? `<div class="banner warn">🎥 ${esc(s.videoError)}</div>` : ""))}
@@ -338,6 +363,28 @@ async function openSub(id) {
     v.currentTime = parseFloat(a.dataset.off) || 0; v.play();
     if (v.scrollIntoView) v.scrollIntoView({ behavior: "smooth", block: "center" });
   });
+  // question-to-question navigation: jump the video AND scroll/highlight that exchange
+  const chips = Array.from(d.querySelectorAll(".qchip[data-line]"));
+  let curQ = -1;
+  const gotoQ = idx => {
+    if (idx < 0 || idx >= chips.length) return;
+    curQ = idx;
+    const a = chips[idx];
+    chips.forEach(c => c.classList.toggle("active", c === a));
+    const v = $("#sub-video");
+    if (v && a.dataset.off != null) { v.currentTime = parseFloat(a.dataset.off) || 0; v.play().catch(() => {}); }
+    const line = a.dataset.line && document.getElementById(a.dataset.line);
+    if (line) {
+      line.scrollIntoView({ behavior: "smooth", block: "center" });
+      const prev = line.style.background;
+      line.style.transition = "background .3s"; line.style.background = "var(--good-soft)";
+      setTimeout(() => { line.style.background = prev; }, 1300);
+    }
+  };
+  chips.forEach((a, idx) => a.onclick = ev => { ev.preventDefault(); gotoQ(idx); });
+  const qprev = d.querySelector("#qprev"), qnext = d.querySelector("#qnext");
+  if (qprev) qprev.onclick = ev => { ev.preventDefault(); gotoQ(curQ <= 0 ? 0 : curQ - 1); };
+  if (qnext) qnext.onclick = ev => { ev.preventDefault(); gotoQ(curQ < 0 ? 0 : Math.min(chips.length - 1, curQ + 1)); };
   if (d.scrollIntoView) d.scrollIntoView({ behavior: "smooth" });
   } catch (e) {
     d.style.display = "block";
