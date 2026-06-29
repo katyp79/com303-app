@@ -4,7 +4,7 @@ let editingId = null;
 
 const $ = s => document.querySelector(s);
 const toast = m => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2400); };
-const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = d => new Date(d).toLocaleString();
 // NOTE: dateStyle/timeStyle CANNOT be combined with timeZoneName (throws) — use explicit components.
 const fmtTZ = d => new Date(d).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
@@ -316,9 +316,9 @@ async function openSub(id) {
   ].filter(Boolean);
   // per-event detail with clickable jumps to that moment in the video
   const off = e => (s.hasVideo && e.videoOffsetMs != null) ? ` <a href="#" class="vjump" data-off="${Math.round(e.videoOffsetMs / 1000)}">▶ ${mmss(e.videoOffsetMs)}</a>` : "";
-  const awayDetail = (s.awayEvents || []).map(e => `<li>Left the page for <strong>${mmss(e.durationMs)}</strong>${e.q ? ` (during Q${e.q})` : ""}${off(e)}</li>`).join("");
-  const copyDetail = (s.copyEvents || []).map(e => `<li>Copied: “<em>${esc((e.text || "").trim() || "(nothing was selected)")}</em>”${e.q ? ` (Q${e.q})` : ""}${off(e)}</li>`).join("");
-  const pasteDetail = (s.pasteEvents || []).map(e => `<li>Pasted into the answer: “<em>${esc((e.text || "").trim() || "(empty)")}</em>”${e.q ? ` (Q${e.q})` : ""}${off(e)}</li>`).join("");
+  const awayDetail = (s.awayEvents || []).map(e => `<li>Left the page for <strong>${mmss(e.durationMs)}</strong>${e.q ? ` (during Q${esc(e.q)})` : ""}${off(e)}</li>`).join("");
+  const copyDetail = (s.copyEvents || []).map(e => `<li>Copied: “<em>${esc((e.text || "").trim() || "(nothing was selected)")}</em>”${e.q ? ` (Q${esc(e.q)})` : ""}${off(e)}</li>`).join("");
+  const pasteDetail = (s.pasteEvents || []).map(e => `<li>Pasted into the answer: “<em>${esc((e.text || "").trim() || "(empty)")}</em>”${e.q ? ` (Q${esc(e.q)})` : ""}${off(e)}</li>`).join("");
   const integrityDetail = (awayDetail || copyDetail || pasteDetail)
     ? `<div class="banner warn" style="text-align:left">
         ${awayDetail ? `<div><strong>👁 Left the page:</strong></div><ul style="margin:4px 0 8px 18px">${awayDetail}</ul>` : ""}

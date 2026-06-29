@@ -196,6 +196,8 @@ app.post("/api/conversation", async (req, res) => {
     const { assignmentId, student, history, seed } = req.body;
     const assignment = store.getAssignment(assignmentId);
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+    // sanity cap: a real session is ~16 turns; reject an absurd history (cost-abuse guard on this unauthenticated endpoint)
+    if (Array.isArray(history) && history.length > 100) return res.status(400).json({ error: "Conversation too long." });
     const turn = await claude.nextTurn({
       assignment,
       student: student || { name: "the student" },
