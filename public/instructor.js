@@ -299,7 +299,12 @@ async function openSub(id) {
         + `<span class="pill warn">✎ student-edited</span> The student manually changed the auto-transcript. Auto-transcribed speech was: “${esc(h.spoken)}”`
         + `<div style="margin-top:2px">their changes: ${wordDiff(h.spoken, h.text)}</div></div>`;
     }
-    return `<div class="transcript-line"${lineId ? ` id="${lineId}"` : ""}><span class="who">${who}:</span> ${esc(h.text)}${t}${resp}${jump}${edited}</div>`;
+    // per-question audio backup player (this answer's own clip, uploaded live during the session)
+    let segPlayer = "";
+    if (h.role === "student" && Array.isArray(s.segmentQs) && s.segmentQs.includes(questions.length)) {
+      segPlayer = `<div style="margin:5px 0 2px 14px"><span class="footnote">🔊 audio backup of this answer: </span><audio controls preload="none" src="/api/segment/${s.id}/${questions.length}?key=${encodeURIComponent(KEY)}" style="height:30px;vertical-align:middle;max-width:320px"></audio></div>`;
+    }
+    return `<div class="transcript-line"${lineId ? ` id="${lineId}"` : ""}><span class="who">${who}:</span> ${esc(h.text)}${t}${resp}${jump}${edited}${segPlayer}</div>`;
   }).join("");
   const navBar = questions.length ? `<div class="qnav">
       <span class="footnote" style="margin-right:2px">Jump to question:</span>
@@ -331,10 +336,11 @@ async function openSub(id) {
     const j = (s.hasVideo && g.startOffsetMs != null) ? ` <a href="#" class="vjump" data-off="${Math.round(g.startOffsetMs / 1000)}">▶</a>` : "";
     return `<li>${esc(g.reason || "capture dropped")} (${span})${j}</li>`;
   }).join("");
+  const nSeg = (s.segmentQs || []).length;
   const avBanner = s.avStatus === "missing"
     ? `<div class="banner warn">🎥 <strong>No recording was saved</strong> for this session — there is no video/audio to verify the answers against. Grade on the transcript + behavioral signals, or pull this student into a short live follow-up.</div>`
     : s.avStatus === "partial"
-    ? `<div class="banner warn">🎥 <strong>Recording is partial</strong> — capture dropped during the session${gapList ? `:<ul style="margin:4px 0 0 18px">${gapList}</ul>` : "."} The covered stretches are still reliable.</div>`
+    ? `<div class="banner warn">🎥 <strong>Recording is partial</strong> — ${nSeg ? `the full-session video/audio didn't fully save, but <strong>per-question audio backups for ${nSeg} answer(s)</strong> are available below (🔊 under each answer).` : "capture dropped during the session."}${gapList ? `<ul style="margin:4px 0 0 18px">${gapList}</ul>` : ""} The covered stretches are reliable.</div>`
     : "";
 
   d.innerHTML = `<div class="row"><h2 style="margin:0">${esc(s.studentName)}</h2><span class="spacer"></span>

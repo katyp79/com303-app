@@ -65,6 +65,14 @@ const uploadVideo = multer({
   limits: { fileSize: 300 * 1024 * 1024 }
 });
 const uploadRec = uploadVideo.fields([{ name: "video", maxCount: 1 }, { name: "audio", maxCount: 1 }]);
+// small per-question audio clips (uploaded live during the session)
+const uploadSegment = multer({
+  storage: multer.diskStorage({
+    destination: store.VIDEO_DIR,
+    filename: (req, file, cb) => cb(null, store.uid() + (/mp4/.test(file.mimetype || "") ? ".mp4" : /ogg/.test(file.mimetype || "") ? ".ogg" : ".webm"))
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 }
+}).single("audio");
 
 // ---------- instructor gate (simple, for the pilot) ----------
 function requireInstructor(req, res, next) {
@@ -237,7 +245,7 @@ app.post("/api/progress", (req, res) => {
         studentId: (student && student.id) || "",
         history: [], videoFile: null, videoError: null,
         startedAt: startedAt || Date.now(), endedAt: null,
-        flaggedPaste: false, flaggedTimeOver: false, flaggedEdited: false, avStatus: null, recordingGaps: [], submittedAt: Date.now(),
+        flaggedPaste: false, flaggedTimeOver: false, flaggedEdited: false, avStatus: null, recordingGaps: [], audioSegments: [], submittedAt: Date.now(),
         feedback: null, suggestedScore: null, scoreRationale: "", grade: null,
         feedbackApproved: false, status: "in-progress"
       };
@@ -253,6 +261,33 @@ app.post("/api/progress", (req, res) => {
     store.saveSubmission(s);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: "progress save failed" }); }
+});
+
+// ---------- per-question audio clip (uploaded live during the session) ----------
+app.post("/api/segment", (req, res) => {
+  uploadSegment(req, res, (err) => {
+    try {
+      if (err) { console.error("segment upload issue:", err.code || err.message); return res.status(200).json({ ok: false }); }
+      const { sessionId, assignmentId, q } = req.body;
+      const f = req.file;
+      if (!sessionId || !f) return res.status(400).json({ error: "bad segment" });
+      // attach to the (possibly in-progress) submission for this session, creating a stub if needed
+      let s = store.getSubmissions().find(x => x.sessionId === sessionId);
+      if (!s) {
+        const a = store.getAssignment(assignmentId);
+        s = {
+          id: store.uid(), sessionId, assignmentId,
+          assignmentTitle: a ? a.title : "(assignment)",
+          studentName: req.body.studentName || "Unknown", studentEmail: "", studentId: "",
+          history: [], status: "in-progress", startedAt: Date.now(), submittedAt: Date.now(), audioSegments: []
+        };
+      }
+      if (!Array.isArray(s.audioSegments)) s.audioSegments = [];
+      s.audioSegments.push({ q: parseInt(q, 10) || 0, file: f.filename });
+      store.saveSubmission(s);
+      res.json({ ok: true });
+    } catch (e) { console.error("segment error:", e.message); res.status(500).json({ error: "segment failed" }); }
+  });
 });
 
 // ---------- submit a completed session ----------
@@ -301,8 +336,11 @@ app.post("/api/submit", (req, res) => {
     submission.copies = submission.copyEvents.length;
     // AV status: missing (no recording), partial (gaps / stopped early / upload error), or ok
     submission.recordingGaps = parseArr(req.body.recordingGaps);
-    const hasRec = !!(submission.videoFile || submission.audioFile);
-    const partialAV = hasRec && (submission.recordingGaps.length > 0 || !!req.body.recordingStoppedEarly || !!submission.videoError);
+    const hasContinuous = !!(submission.videoFile || submission.audioFile);
+    const segCount = Array.isArray(submission.audioSegments) ? submission.audioSegments.length : 0;
+    const hasRec = hasContinuous || segCount > 0;
+    // partial if the full recording dropped/failed but we still have SOME audio (per-question clips or a gappy file)
+    const partialAV = hasRec && (!hasContinuous || submission.recordingGaps.length > 0 || !!req.body.recordingStoppedEarly || !!submission.videoError);
     submission.avStatus = !hasRec ? "missing" : (partialAV ? "partial" : "ok");
     // record which version of the source document the coach was working from (per #10)
     submission.sourceDocHash = assignment.readingText
@@ -437,8 +475,10 @@ app.get("/api/submissions", requireInstructor, (req, res) => {
     ...s,
     hasVideo: !!s.videoFile,
     hasAudio: !!s.audioFile,
+    segmentQs: (s.audioSegments || []).map(x => x.q),
     videoFile: undefined,
-    audioFile: undefined
+    audioFile: undefined,
+    audioSegments: undefined
   }));
   res.json(list);
 });
@@ -479,13 +519,14 @@ app.get("/api/submissions.csv", requireInstructor, (req, res) => {
 // Bulk-download all recordings (video + audio backups) for the filter as one zip — for offloading.
 app.get("/api/videos.zip", requireInstructor, (req, res) => {
   const sel = req.query.assignmentId;
-  let subs = store.getSubmissions().filter(s => s.videoFile || s.audioFile);
+  let subs = store.getSubmissions().filter(s => s.videoFile || s.audioFile || (s.audioSegments && s.audioSegments.length));
   if (sel) subs = subs.filter(s => s.assignmentId === sel);
   const files = [];
   for (const s of subs) {
     const base = (s.studentName || "student").replace(/[^\w.-]+/g, "_") + "__" + s.id;
     if (s.videoFile) { const p = path.join(store.VIDEO_DIR, s.videoFile); if (fs.existsSync(p)) files.push({ p, name: base + path.extname(s.videoFile) }); }
     if (s.audioFile) { const p = path.join(store.VIDEO_DIR, s.audioFile); if (fs.existsSync(p)) files.push({ p, name: base + "_audio" + path.extname(s.audioFile) }); }
+    for (const seg of (s.audioSegments || [])) { const p = path.join(store.VIDEO_DIR, seg.file); if (fs.existsSync(p)) files.push({ p, name: base + "_q" + seg.q + "_audio" + path.extname(seg.file) }); }
   }
   if (!files.length) return res.status(404).send("No recordings to download.");
   res.setHeader("Content-Type", "application/zip");
@@ -512,6 +553,12 @@ app.post("/api/purge-videos", requireInstructor, (req, res) => {
         s[key] = null; did = true;
       }
     }
+    for (const seg of (s.audioSegments || [])) {
+      const p = path.join(store.VIDEO_DIR, seg.file);
+      if (fs.existsSync(p)) { try { fs.unlinkSync(p); } catch {} }
+      did = true;
+    }
+    if (s.audioSegments && s.audioSegments.length) s.audioSegments = [];
     if (did) { s.videoPurgedAt = Date.now(); store.saveSubmission(s); purged++; }
   }
   res.json({ ok: true, purged });
@@ -520,7 +567,7 @@ app.post("/api/purge-videos", requireInstructor, (req, res) => {
 app.get("/api/submissions/:id", requireInstructor, (req, res) => {
   const s = store.getSubmission(req.params.id);
   if (!s) return res.status(404).json({ error: "not found" });
-  res.json({ ...s, hasVideo: !!s.videoFile, hasAudio: !!s.audioFile });
+  res.json({ ...s, hasVideo: !!s.videoFile, hasAudio: !!s.audioFile, segmentQs: (s.audioSegments || []).map(x => x.q) });
 });
 app.get("/api/audio/:id", requireInstructor, (req, res) => {
   const s = store.getSubmission(req.params.id);
@@ -534,6 +581,14 @@ app.get("/api/video/:id", requireInstructor, (req, res) => {
   if (!s || !s.videoFile) return res.status(404).send("No video");
   const p = path.join(store.VIDEO_DIR, s.videoFile);
   if (!fs.existsSync(p)) return res.status(404).send("Video file missing");
+  res.sendFile(p);
+});
+app.get("/api/segment/:id/:q", requireInstructor, (req, res) => {
+  const s = store.getSubmission(req.params.id);
+  const seg = s && Array.isArray(s.audioSegments) && s.audioSegments.find(x => String(x.q) === String(req.params.q));
+  if (!seg) return res.status(404).send("No segment");
+  const p = path.join(store.VIDEO_DIR, seg.file);
+  if (!fs.existsSync(p)) return res.status(404).send("Segment file missing");
   res.sendFile(p);
 });
 app.post("/api/submissions/:id/feedback", requireInstructor, async (req, res) => {

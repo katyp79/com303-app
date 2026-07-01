@@ -12,6 +12,7 @@ let history = [];          // [{role:'tutor'|'student', text}]
 let student = { name: "", id: "" };
 let mediaStream = null, mediaRecorder = null, videoChunks = [];
 let audioRecorder = null, audioChunks = []; // separate audio-only backup, in case the video recording fails
+let qAudioRecorder = null, qAudioChunks = [], qAudioIndex = 0; // per-question audio backup (uploaded live)
 let recordingStartedAt = null, sessionStartedAt = null;
 // ---- AV reliability: detect/log capture gaps so the instructor knows if a recording is partial ----
 const AUDIO_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
@@ -231,6 +232,46 @@ $("#begin-btn").addEventListener("click", async () => {
   coachTurn(); // AI opens
 });
 
+// ---------- per-question audio backup ----------
+// A small audio-only clip per question, uploaded the instant the student submits that answer.
+// Because it's tiny and uploads live, it survives even when the big continuous recording fails.
+function startQuestionAudio() {
+  if (!mediaStream || !window.MediaRecorder) return;
+  try {
+    const tracks = mediaStream.getAudioTracks();
+    if (!tracks.length) return;
+    qAudioChunks = [];
+    qAudioIndex = questionNum(); // the number of the question being answered
+    const aMime = pickAudioMime();
+    qAudioRecorder = new MediaRecorder(new MediaStream(tracks), aMime ? { mimeType: aMime, audioBitsPerSecond: 64000 } : {});
+    qAudioRecorder.ondataavailable = e => { if (e.data && e.data.size) qAudioChunks.push(e.data); };
+    qAudioRecorder.start();
+  } catch (e) { qAudioRecorder = null; }
+}
+function stopAndUploadQuestionAudio() {
+  const rec = qAudioRecorder, q = qAudioIndex, chunks = qAudioChunks;
+  qAudioRecorder = null; qAudioChunks = [];
+  if (!rec || rec.state === "inactive") return;
+  rec.onstop = () => {
+    if (!chunks.length) return;
+    uploadQuestionAudio(new Blob(chunks, { type: chunks[0] && chunks[0].type || "audio/webm" }), q);
+  };
+  try { rec.stop(); } catch {}
+}
+async function uploadQuestionAudio(blob, q) {
+  if (!blob || !blob.size) return;
+  const fd = new FormData();
+  fd.append("sessionId", sessionId || "");
+  fd.append("assignmentId", ASSIGNMENT_ID);
+  fd.append("studentName", student.name || "");
+  fd.append("q", String(q));
+  fd.append("audio", blob, "q" + q + "-audio.webm");
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try { const r = await fetch("/api/segment", { method: "POST", body: fd }); if (r.ok) return; } catch {}
+    await new Promise(res => setTimeout(res, attempt * 1000));
+  }
+}
+
 function pickAudioMime() {
   const opts = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
   for (const m of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
@@ -289,6 +330,7 @@ async function coachTurn() {
 
 function enableAnswering() {
   recognizedText = ""; manuallyEdited = false; answerFirstWordAt = null; answerFirstWordOffsetMs = null; $("#answer").value = ""; updateWC();
+  startQuestionAudio(); // per-question audio backup — small, uploads live, survives even if the full recording fails
   $("#edit-note").style.color = "var(--muted)";
   $("#edit-note").innerHTML = STATIC_EDIT_NOTE;
   // show the question being answered right above the answer box, so both are on screen
@@ -415,6 +457,7 @@ function submitAnswer(forced, emptyMsg) {
   if (forced && !ans) ans = emptyMsg || "(no answer given before the time limit)";
   clearAnswerLimit();
   clearAnswerWindow();
+  stopAndUploadQuestionAudio(); // finalize + upload this question's audio clip now
   stopListening();
   const spoken = recognizedText.replace(/\s+/g, " ").trim();
   // only flag as edited if the student ACTUALLY typed/edited AND the result differs from speech
@@ -566,6 +609,7 @@ async function finish() {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
   clearAnswerLimit();
   clearAnswerWindow();
+  if (qAudioRecorder && qAudioRecorder.state !== "inactive") { try { qAudioRecorder.stop(); } catch {} qAudioRecorder = null; }
 }
 function stopRecording() {
   const stopOne = (rec, chunks, fallbackType) => new Promise(resolve => {
