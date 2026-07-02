@@ -12,7 +12,7 @@ let history = [];          // [{role:'tutor'|'student', text}]
 let student = { name: "", id: "" };
 let mediaStream = null, mediaRecorder = null, videoChunks = [];
 let audioRecorder = null, audioChunks = []; // separate audio-only backup, in case the video recording fails
-let qAudioRecorder = null, qAudioChunks = [], qAudioIndex = 0; // per-question audio backup (uploaded live)
+let qAudioRecorder = null; // per-question audio backup (uploaded live); each recorder buffers via a closure
 let recordingStartedAt = null, sessionStartedAt = null;
 // ---- AV reliability: detect/log capture gaps so the instructor knows if a recording is partial ----
 const AUDIO_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
@@ -240,23 +240,21 @@ function startQuestionAudio() {
   try {
     const tracks = mediaStream.getAudioTracks();
     if (!tracks.length) return;
-    qAudioChunks = [];
-    qAudioIndex = questionNum(); // the number of the question being answered
+    const chunks = [];                 // THIS recorder's own buffer (closure — no shared-state race)
+    const q = questionNum();           // the number of the question being answered
     const aMime = pickAudioMime();
-    qAudioRecorder = new MediaRecorder(new MediaStream(tracks), aMime ? { mimeType: aMime, audioBitsPerSecond: 64000 } : {});
-    qAudioRecorder.ondataavailable = e => { if (e.data && e.data.size) qAudioChunks.push(e.data); };
-    qAudioRecorder.start();
+    const rec = new MediaRecorder(new MediaStream(tracks), aMime ? { mimeType: aMime, audioBitsPerSecond: 64000 } : {});
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    // onstop fires AFTER ondataavailable, so `chunks` is populated by the time we upload
+    rec.onstop = () => { if (chunks.length) uploadQuestionAudio(new Blob(chunks, { type: chunks[0].type || "audio/webm" }), q); };
+    rec.start();
+    qAudioRecorder = rec;              // kept only so submit/finish can stop it
   } catch (e) { qAudioRecorder = null; }
 }
 function stopAndUploadQuestionAudio() {
-  const rec = qAudioRecorder, q = qAudioIndex, chunks = qAudioChunks;
-  qAudioRecorder = null; qAudioChunks = [];
-  if (!rec || rec.state === "inactive") return;
-  rec.onstop = () => {
-    if (!chunks.length) return;
-    uploadQuestionAudio(new Blob(chunks, { type: chunks[0] && chunks[0].type || "audio/webm" }), q);
-  };
-  try { rec.stop(); } catch {}
+  const rec = qAudioRecorder;
+  qAudioRecorder = null;
+  if (rec && rec.state !== "inactive") { try { rec.stop(); } catch {} } // its onstop (bound at start) does the upload
 }
 async function uploadQuestionAudio(blob, q) {
   if (!blob || !blob.size) return;
