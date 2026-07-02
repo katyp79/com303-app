@@ -330,7 +330,7 @@ async function coachTurn() {
     const to = setTimeout(() => ctrl.abort(), 75000); // don't let a hung server strand the student
     const r = await fetch("/api/conversation", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assignmentId: ASSIGNMENT_ID, student, history, seed: sessionSeed }),
+      body: JSON.stringify({ assignmentId: ASSIGNMENT_ID, student, history, seed: sessionSeed, sessionId }),
       signal: ctrl.signal
     });
     clearTimeout(to);

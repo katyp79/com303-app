@@ -201,11 +201,20 @@ app.delete("/api/assignments/:id", requireInstructor, (req, res) => {
 // ---------- live conversation ----------
 app.post("/api/conversation", async (req, res) => {
   try {
-    const { assignmentId, student, history, seed } = req.body;
+    const { assignmentId, student, history, seed, sessionId } = req.body;
     const assignment = store.getAssignment(assignmentId);
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
     // sanity cap: a real session is ~16 turns; reject an absurd history (cost-abuse guard on this unauthenticated endpoint)
     if (Array.isArray(history) && history.length > 100) return res.status(400).json({ error: "Conversation too long." });
+    // REDO detection (by email): if this student already has a prior attempt at this assignment,
+    // have the coach use fresh scenarios/framings, go deeper, and avoid the questions they already saw.
+    const email = ((student && student.email) || "").trim().toLowerCase();
+    const priorAttempts = email
+      ? store.getSubmissions().filter(s => s.assignmentId === assignmentId && ((s.studentEmail || "").trim().toLowerCase() === email) && s.sessionId !== sessionId)
+      : [];
+    const priorQuestions = priorAttempts
+      .flatMap(s => (s.history || []).filter(h => h && h.role === "tutor").map(h => h.text))
+      .filter(Boolean).slice(0, 30);
     const turn = await claude.nextTurn({
       assignment,
       student: student || { name: "the student" },
@@ -217,7 +226,10 @@ app.post("/api/conversation", async (req, res) => {
         // re-asked, so the tail concept (e.g. digital inequality) is never truncated.
         return cc ? Math.max(base, cc + 2) : base;
       })(),
-      seed: seed || 1
+      seed: seed || 1,
+      isRedo: priorAttempts.length > 0,
+      attemptNumber: priorAttempts.length + 1,
+      priorQuestions
     });
     res.json(turn);
   } catch (e) {
@@ -348,6 +360,11 @@ app.post("/api/submit", (req, res) => {
     submission.sourceDocHash = assignment.readingText
       ? crypto.createHash("sha256").update(assignment.readingText).digest("hex").slice(0, 12) : null;
     submission.coachMode = assignment.coachMode || "assessment";
+    // attempt number for this student+assignment (by email) — so redos are visible in the dashboard
+    const emailLc = (student.email || "").trim().toLowerCase();
+    submission.attemptNumber = 1 + (emailLc
+      ? store.getSubmissions().filter(x => x.assignmentId === assignmentId && ((x.studentEmail || "").trim().toLowerCase() === emailLc) && x.sessionId !== sessionId).length
+      : 0);
     submission.submittedAt = Date.now();
     submission.status = "complete";
 
