@@ -50,6 +50,7 @@ function startRecorders(stream) {
     mediaRecorder.start(1000);
     if (!recordingStartedAt) recordingStartedAt = Date.now();
     recordingEverStarted = true;
+    setupInfo.recorderStarted = true;
     $("#recdot").style.display = "inline-block";
     $("#cam-status").textContent = wantVideo ? "Recording video" : "Recording audio";
   } catch (e) { $("#cam-status").textContent = "Recording unavailable"; }
@@ -85,7 +86,7 @@ function saveProgress() {
   if (!sessionId) return;
   fetch("/api/progress", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, assignmentId: ASSIGNMENT_ID, student, history, startedAt: sessionStartedAt, awayEvents, copyEvents, pasteEvents })
+    body: JSON.stringify({ sessionId, assignmentId: ASSIGNMENT_ID, student, history, startedAt: sessionStartedAt, awayEvents, copyEvents, pasteEvents, setupInfo })
   }).catch(() => {}); // fire-and-forget; never block the conversation on this
 }
 let sessionActive = false; // true while a conversation is in progress and not yet submitted
@@ -131,6 +132,17 @@ let busy = false;
 let pasteUsed = false; // flags if the student pasted into the answer box (integrity signal)
 let timeOverFlag = false; // flags if the student went past the per-answer time limit on any answer
 let manuallyEdited = false; // true only when the student actually types/edits (not the speech engine)
+// ---- setup diagnostics: so the instructor can SEE why a struggling student's session failed ----
+let setupInfo = {
+  userAgent: navigator.userAgent,
+  speechApiAvailable: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+  micPermission: "unknown",   // granted | denied | prompt | unknown (from the Permissions API)
+  gotAudioTrack: false,       // getUserMedia actually returned a microphone track
+  gotVideoTrack: false,
+  speechStarted: false,       // speech recognition successfully began at least once
+  speechError: null,          // last speech-recognition error (e.g. "not-allowed", "network")
+  recorderStarted: false      // MediaRecorder actually started
+};
 
 // ---------- load assignment ----------
 (async function init() {
@@ -203,6 +215,16 @@ $("#begin-btn").addEventListener("click", async () => {
       return toast("This browser can't record. Please use Chrome or Edge on a computer.");
     }
   }
+
+  // record what the student's setup actually did (so failures are diagnosable, not guesswork)
+  setupInfo.gotAudioTrack = !!(mediaStream && mediaStream.getAudioTracks().length);
+  setupInfo.gotVideoTrack = !!(mediaStream && mediaStream.getVideoTracks().length);
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const p = await navigator.permissions.query({ name: "microphone" });
+      setupInfo.micPermission = p.state; // granted | denied | prompt
+    }
+  } catch { /* Permissions API not available for mic on this browser */ }
 
   if (mediaStream) $("#cam").srcObject = mediaStream;
   $("#intro").style.display = "none";
@@ -326,8 +348,14 @@ async function coachTurn() {
   } catch (e) { busy = false; showRetry((e && e.name === "AbortError") ? "That took too long to respond. Click Retry — your conversation is safe." : "Connection problem. Click Retry — your conversation is safe."); }
 }
 
+function updateProgressCue() {
+  const el = $("#progress-cue"); if (!el) return;
+  el.style.display = "block";
+  el.innerHTML = `📌 <strong>Question ${questionNum()}</strong> — keep going until you see the green <strong>“✓ All done”</strong> screen. Your session is only saved when you finish, so <strong>don't close or leave this tab</strong> until you see it.`;
+}
 function enableAnswering() {
   recognizedText = ""; manuallyEdited = false; answerFirstWordAt = null; answerFirstWordOffsetMs = null; $("#answer").value = ""; updateWC();
+  updateProgressCue();
   startQuestionAudio(); // per-question audio backup — small, uploads live, survives even if the full recording fails
   $("#edit-note").style.color = "var(--muted)";
   $("#edit-note").innerHTML = STATIC_EDIT_NOTE;
@@ -409,6 +437,7 @@ function startListening(attempt) {
   recog.continuous = true; recog.interimResults = true; recog.lang = "en-US";
   recog.onstart = () => {
     listening = true;
+    setupInfo.speechStarted = true;
     $("#retry-btn").style.display = "none";
     $("#mic").classList.add("live"); $("#mic-label").textContent = "Stop";
     $("#mic-status").textContent = "🎙 Listening… speak your answer, then click Stop.";
@@ -424,6 +453,7 @@ function startListening(attempt) {
     updateWC();
   };
   recog.onerror = e => {
+    if (e.error && e.error !== "no-speech" && e.error !== "aborted") setupInfo.speechError = e.error;
     if (e.error === "not-allowed" || e.error === "service-not-allowed") { $("#mic-status").textContent = "Microphone blocked — please allow it, or type your answer below."; }
     else if (e.error !== "no-speech" && e.error !== "aborted") { $("#mic-status").textContent = "Mic hiccup (" + e.error + "). Click the mic to retry, or type below."; }
   };
@@ -577,6 +607,7 @@ async function finish() {
   fd.append("recordingGaps", JSON.stringify(recordingGaps));
   fd.append("recordingEverStarted", recordingEverStarted ? "1" : "");
   fd.append("recordingStoppedEarly", recordingStoppedEarly ? "1" : "");
+  fd.append("setupInfo", JSON.stringify(setupInfo));
   if (hadVideo) fd.append("video", video, "session.webm");
   if (hadAudio) fd.append("audio", audio, "session-audio.webm");
 

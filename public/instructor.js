@@ -342,6 +342,21 @@ async function openSub(id) {
     : s.avStatus === "partial"
     ? `<div class="banner warn">🎥 <strong>Recording is partial</strong> — ${nSeg ? `the full-session video/audio didn't fully save, but <strong>per-question audio backups for ${nSeg} answer(s)</strong> are available below (🔊 under each answer).` : "capture dropped during the session."}${gapList ? `<ul style="margin:4px 0 0 18px">${gapList}</ul>` : ""} The covered stretches are reliable.</div>`
     : "";
+  // setup diagnostics — what the student's browser/mic actually did (most useful for failed/incomplete sessions)
+  let setupLine = "";
+  if (s.setupInfo) {
+    const si = s.setupInfo;
+    const bits = [
+      "mic permission: " + (si.micPermission || "unknown"),
+      "mic captured: " + (si.gotAudioTrack ? "yes" : "NO"),
+      "camera: " + (si.gotVideoTrack ? "yes" : "no"),
+      "speech recognition started: " + (si.speechStarted ? "yes" : "NO"),
+      "recorder started: " + (si.recorderStarted ? "yes" : "NO")
+    ];
+    if (si.speechError) bits.push("speech error: " + si.speechError);
+    const problem = !si.gotAudioTrack || !si.speechStarted || !si.recorderStarted || si.speechError;
+    setupLine = `<div class="banner ${problem ? "warn" : "info"}" style="text-align:left"><strong>🖥 Setup:</strong> ${esc(bits.join(" · "))}<div class="footnote" style="margin-top:4px;word-break:break-all">${esc(si.userAgent || "")}</div></div>`;
+  }
 
   d.innerHTML = `<div class="row"><h2 style="margin:0">${esc(s.studentName)}</h2><span class="spacer"></span>
       <a class="btn subtle" style="font-size:13px" href="/api/submissions/${s.id}/export.json?key=${encodeURIComponent(KEY)}">⤓ JSON</a>
@@ -354,6 +369,7 @@ async function openSub(id) {
     ${s.flaggedTimeOver ? `<div class="banner warn">⏱ This student <strong>went over the per-answer time limit</strong> on at least one question. A signal to look closer at pacing — not an automatic penalty.</div>` : ""}
     ${s.flaggedEdited ? `<div class="banner warn">✎ This student <strong>manually edited the auto-transcript</strong> of one or more spoken answers (this is a student action, not automatic transcription cleanup). The edited answers below show the original speech-to-text and exactly what the student changed.</div>` : ""}
     ${avBanner}
+    ${setupLine}
     ${watchBits.length ? `<div class="banner warn">🔎 <strong>Worth a closer look:</strong> ${watchBits.join(" · ")}. These are signals, not proof — watch the video to judge for yourself.</div>` : ""}
     ${integrityDetail}
     ${navBar}

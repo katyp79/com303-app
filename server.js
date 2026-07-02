@@ -257,6 +257,7 @@ app.post("/api/progress", (req, res) => {
     if (Array.isArray(req.body.awayEvents)) { s.awayEvents = req.body.awayEvents; s.tabAway = req.body.awayEvents.length; }
     if (Array.isArray(req.body.copyEvents)) { s.copyEvents = req.body.copyEvents; s.copies = req.body.copyEvents.length; }
     if (Array.isArray(req.body.pasteEvents)) s.pasteEvents = req.body.pasteEvents;
+    if (req.body.setupInfo && typeof req.body.setupInfo === "object") s.setupInfo = req.body.setupInfo;
     s.endedAt = Date.now();
     store.saveSubmission(s);
     res.json({ ok: true });
@@ -332,6 +333,7 @@ app.post("/api/submit", (req, res) => {
     submission.awayEvents = parseArr(req.body.awayEvents);
     submission.copyEvents = parseArr(req.body.copyEvents);
     submission.pasteEvents = parseArr(req.body.pasteEvents);
+    try { const si = JSON.parse(req.body.setupInfo || "null"); if (si && typeof si === "object") submission.setupInfo = si; } catch {}
     submission.tabAway = submission.awayEvents.length;
     submission.copies = submission.copyEvents.length;
     // AV status: missing (no recording), partial (gaps / stopped early / upload error), or ok
